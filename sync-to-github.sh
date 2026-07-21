@@ -116,17 +116,16 @@ fi
 
 # ── 5. push to remote ───────────────────────────────────────────────
 
+# This is a local mirror that's a derivative of the source. The source
+# (~/Desktop/OMCA-GODMODE/TOOLS/archetype-router) is the canonical
+# state. We force-push so the mirror always reflects the source.
+
 if [ "$DRY_RUN" = "1" ]; then
-    say "Dry run — would push to $REMOTE/$BRANCH:"
-    (cd "$MIRROR" && git log --oneline origin/$BRANCH..HEAD 2>/dev/null | head -5) || note "(no commits ahead of origin)"
+    say "Dry run — would force-push to $REMOTE/$BRANCH:"
+    (cd "$MIRROR" && git log --oneline 2>/dev/null | head -5)
 else
-    ahead=$(cd "$MIRROR" && git rev-list --count origin/$BRANCH..HEAD 2>/dev/null || echo 0)
-    if [ "$ahead" = "0" ]; then
-        note "Nothing to push (mirror is up to date with origin/$BRANCH)"
-    else
-        say "Pushing $ahead commit(s) to $REMOTE/$BRANCH..."
-        (cd "$MIRROR" && git push "$REMOTE" "$BRANCH" 2>&1 | tail -5)
-    fi
+    say "Force-pushing to $REMOTE/$BRANCH (mirror reflects source of truth)..."
+    (cd "$MIRROR" && git push --force "$REMOTE" "$BRANCH" 2>&1 | tail -5)
 fi
 
 say "Done."
