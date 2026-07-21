@@ -1,0 +1,146 @@
+# OMCA Archetype Router — archetype schema definitions
+#
+# This file holds the MECHANICAL archetype schema: toolsets, SOUL identity
+# path, output schema, max_iterations, plus a list of skills that are
+# DEFAULT-DISABLED across ALL archetypes.
+#
+# MODEL AND PROVIDER LIVE IN archetype_model_config.json (NOT here).
+# SKILL INCLUDE/EXCLUDE LIVE ON EACH TOOL CALL (NOT here).
+# IDENTITY PROSE LIVES IN SOUL_<name>.md (NOT here).
+#
+# The plugin reads both config files + the SOUL file on every delegation
+# call. Changes take effect immediately on next call — no plugin reload.
+#
+# Schema fields per archetype:
+#   - default_toolsets       : which tool groups the subagent gets
+#   - soul                   : relative path to the SOUL_<name>.md file
+#                              (loaded as the subagent's persistent persona)
+#   - output_schema          : optional JSON schema the subagent must return
+#   - max_iterations         : per-archetype iteration cap (default 50)
+#
+# Global field:
+#   - default_disabled_skills: fnmatch globs that are EXCLUDED from every
+#                              archetype unless the orchestrator explicitly
+#                              re-includes them via skill_include_override.
+
+# ---------------------------------------------------------------------------
+# SKILLS THAT ARE DISABLED BY DEFAULT
+# ---------------------------------------------------------------------------
+# The orchestrator decides which skills each subagent sees AT CALL TIME via
+# the skill_include_override / skill_exclude_override parameters. THIS LIST
+# is the safety net — skills here are stripped out unless the orchestrator
+# explicitly opts back in.
+#
+# Add to this list when:
+#   - A skill repeatedly adds context pollution in day-to-day work
+#   - A skill is rarely useful but expensive to keep in context
+#   - Testing reveals a specific archetype benefits from exclusion
+#
+# Removal requires confidence — re-enable ONLY after extended testing.
+default_disabled_skills:
+  - "honcho-*"     # Honcho memory helpers: context-pollution-prone in narrow tasks.
+                   # Day-to-day delegated work doesn't need them. Orchestrator opts in
+                   # explicitly when the task is about cross-session memory recall.
+  # - "knows_zernio-instagram-threads"  # example: niche platform skill, disable when off-topic
+  # Add more as testing reveals context-pollution patterns.
+
+# ---------------------------------------------------------------------------
+# ARCHETYPE SCHEMAS
+# ---------------------------------------------------------------------------
+
+archetypes:
+
+  consultant:
+    # Arc I — Raw Power, Frontier Stable
+    # Role: complex escalation, ambiguous synthesis, user-facing chat.
+    # Best at: deep multi-step reasoning, function calling, multimodal,
+    #          catching hidden intent.
+    # Identity prose: SOUL_consultant.md
+    # Model: see archetype_model_config.json -> archetypes.consultant
+    default_toolsets: [terminal, file, web]
+    soul: SOUL_consultant.md
+    output_schema: null
+    max_iterations: 50
+
+  long_horizon:
+    # Arc II — Low-Hallucination, Stable, Long-Running
+    # Role: extended operational workflows, deep stateful tasks.
+    # Best at: low hallucination over long horizons, complex multi-step
+    #          execution that must not drift.
+    # Identity prose: SOUL_long_horizon.md
+    # Model: see archetype_model_config.json -> archetypes.long_horizon
+    default_toolsets: [terminal, file, web]
+    soul: SOUL_long_horizon.md
+    output_schema: null
+    max_iterations: 100   # long-horizon gets a bit more headroom
+
+  high_hallucination:
+    # Arc III — Creative, Lateral, High-Variance
+    # Role: ideation, brainstorming, creative writing, alternative angles,
+    #       short-horizon creative coding. Power model with terminal access.
+    # Best at: finding non-obvious solutions, generating diverse perspectives,
+    #          lateral thinking.
+    # Caution: high hallucination rate. SHORT HORIZON — bounded, supervised
+    #          runs. The orchestrator MUST enforce post-validation downstream.
+    # Identity prose: SOUL_high_hallucination.md
+    # Model: see archetype_model_config.json -> archetypes.high_hallucination
+    default_toolsets: [terminal, file, web]    # full surface; sandbox is short-horizon, not tool restriction
+    soul: SOUL_high_hallucination.md
+    output_schema:
+      type: object
+      required: [creative_perspectives]
+      properties:
+        creative_perspectives:
+          type: array
+          items:
+            type: object
+            required: [concept_title, creative_approach, factual_grounding, abstention_flag]
+            properties:
+              concept_title:       {type: string}
+              creative_approach:   {type: string}
+              factual_grounding:   {type: string}
+              abstention_flag:     {type: boolean}
+        unsupported_ideas_discarded_count: {type: integer}
+    max_iterations: 40   # short horizon — bounded by iteration count, not by tool removal
+
+  speedster_internal:
+    # Arc IV (variant: INTERNAL) — Cheap, Fast, Distilled, reads local files
+    # Role: classify/summarize/extract from local files. Pattern-match inside
+    #       local data. Cheap 80/20 work on the filesystem.
+    # Best at: 50-200ms to first token, low cost, deterministic execution.
+    # Anti-pattern: cannot select from large tool/skill registries. The
+    #               orchestrator MUST inject explicit tool picks.
+    # Identity prose: SOUL_speedster_internal.md
+    # Model: see archetype_model_config.json -> archetypes.speedster_internal
+    default_toolsets: [file]    # file reads only — NO terminal, NO web
+    soul: SOUL_speedster_internal.md
+    output_schema:
+      type: object
+      # Schema is archetype-specific — orchestrator may inject a tighter
+      # schema at call time via the `output_schema_override` parameter.
+      additionalProperties: true
+    max_iterations: 15   # local file work is tightest budget
+
+  speedster_internet:
+    # Arc IV (variant: INTERNET) — Cheap, Fast, Distilled, fetches URLs
+    # Role: fetch URL and classify, web search and summarize, intent
+    #       detection on API responses. Cheap 80/20 work on the network.
+    # Best at: 50-200ms to first token, low cost, deterministic execution.
+    # Anti-pattern: cannot select from large tool/skill registries. The
+    #               orchestrator MUST inject explicit tool picks.
+    # Identity prose: SOUL_speedster_internet.md
+    # Model: see archetype_model_config.json -> archetypes.speedster_internet
+    default_toolsets: [web]    # web fetches only — NO terminal, NO file
+    soul: SOUL_speedster_internet.md
+    output_schema:
+      type: object
+      # Schema is archetype-specific — orchestrator may inject a tighter
+      # schema at call time via the `output_schema_override` parameter.
+      additionalProperties: true
+    max_iterations: 20   # distilled = bounded, fast loops
+
+# Global defaults — applied to any archetype that doesn't override.
+defaults:
+  max_iterations: 50
+  default_toolsets: [terminal, file, web]
+  output_schema: null

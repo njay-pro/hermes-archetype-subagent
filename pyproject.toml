@@ -1,0 +1,154 @@
+[project]
+name = "hermes-archetype-subagent"
+version = "0.3.0"
+description = "OMCA archetype-specific delegation router for Hermes — 5 specialist delegate_task tools with per-archetype model, persona, toolset, and skill isolation."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Njay", email = "njay@njaypro.com" },
+]
+keywords = [
+    "hermes",
+    "omca",
+    "multi-agent",
+    "orchestration",
+    "archetype",
+    "delegation",
+    "llm-routing",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "PyYAML>=6.0",
+    "ruamel.yaml>=0.18",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "mypy>=1.10",
+    "ruff>=0.6",
+    "types-PyYAML",
+    "python-dotenv",
+    "requests",
+    "httpx",
+    "openai",
+]
+test = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/njay-pro/hermes-archetype-subagent"
+Repository = "https://github.com/njay-pro/hermes-archetype-subagent"
+Issues = "https://github.com/njay-pro/hermes-archetype-subagent/issues"
+
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+# The plugin is a Hermes plugin, NOT a pip-installable wheel. Hermes loads
+# it via importlib.util.spec_from_file_location pointed at __init__.py in
+# this flat directory. The pyproject.toml below exists for:
+#   1. dev tooling config (ruff, mypy, pytest, coverage)
+#   2. CI integration
+#   3. contributor documentation
+# Do NOT `pip install` this directory — Hermes loads it directly.
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+# ── Linting (ruff) ──────────────────────────────────────────────────────
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["build", "dist", ".venv", "tests/fixtures"]
+
+[tool.ruff.lint]
+# Strict: enable most rule families, leave destructive ones off.
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+    "PL",   # pylint
+]
+ignore = [
+    "PLR0913",  # too-many-arguments (acceptable for delegation wrappers)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # tests can use assert
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ── Type checking (mypy) ─────────────────────────────────────────────────
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Native Hermes modules — we type-check our use of them but don't enforce their internals
+module = ["tools.delegate_tool", "hermes_cli.*", "agent.*", "model_tools", "run_agent"]
+ignore_missing_imports = true
+
+# ── Testing (pytest) ────────────────────────────────────────────────────
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+# Use importlib mode so pytest treats test files as standalone modules and
+# doesn't try to import the plugin's __init__.py (which uses relative imports).
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--showlocals",
+    "--tb=short",
+    "--import-mode=importlib",
+]
+markers = [
+    "unit: pure unit tests (no external state)",
+    "integration: tests that touch the filesystem or run real code paths",
+    "slow: tests that take more than 1 second",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["."]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "\\.\\.\\.",
+    "pass",
+]
