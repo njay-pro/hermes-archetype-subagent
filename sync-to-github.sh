@@ -64,6 +64,7 @@ note "Mirror: $MIRROR"
 if [ "$DRY_RUN" = "1" ]; then
     say "Dry run — would rsync:"
     rsync -avhn --delete \
+        --exclude='.git' \
         --exclude='.coverage' \
         --exclude='.coverage.*' \
         --exclude='.pytest_cache' \
@@ -74,6 +75,7 @@ if [ "$DRY_RUN" = "1" ]; then
 else
     say "Syncing source -> mirror..."
     rsync -a --delete \
+        --exclude='.git' \
         --exclude='.coverage' \
         --exclude='.coverage.*' \
         --exclude='.pytest_cache' \
@@ -86,30 +88,28 @@ fi
 
 # ── 4. commit changes in mirror ──────────────────────────────────────
 
-cd "$MIRROR"
-
 if [ "$DRY_RUN" = "1" ]; then
     say "Dry run — would commit (if there are changes):"
-    if ! git diff --quiet 2>/dev/null; then
-        git diff --stat | head -5
+    if ! (cd "$MIRROR" && git diff --quiet) 2>/dev/null; then
+        (cd "$MIRROR" && git diff --stat | head -5)
     else
         note "(no changes)"
     fi
 else
-    if git diff --quiet HEAD 2>/dev/null && git diff --cached --quiet 2>/dev/null; then
+    if (cd "$MIRROR" && git diff --quiet HEAD) 2>/dev/null && (cd "$MIRROR" && git diff --cached --quiet) 2>/dev/null; then
         note "No changes to commit"
     else
         say "Committing changes..."
-        git add -A
+        (cd "$MIRROR" && git add -A)
         # Auto-generate commit message: list changed files + diff stat
-        if git diff --cached --quiet; then
+        if (cd "$MIRROR" && git diff --cached --quiet); then
             note "(nothing to commit after all)"
         else
-            changed=$(git diff --cached --name-only | wc -l | tr -d ' ')
+            changed=$(cd "$MIRROR" && git diff --cached --name-only | wc -l | tr -d ' ')
             msg="sync: $changed file(s) from OMCA monorepo
 
-$(git diff --cached --stat | head -20)"
-            git commit -m "$msg" 2>&1 | tail -5
+$(cd "$MIRROR" && git diff --cached --stat | head -20)"
+            (cd "$MIRROR" && git commit -m "$msg" 2>&1 | tail -5)
         fi
     fi
 fi
@@ -118,14 +118,14 @@ fi
 
 if [ "$DRY_RUN" = "1" ]; then
     say "Dry run — would push to $REMOTE/$BRANCH:"
-    git log --oneline origin/$BRANCH..HEAD 2>/dev/null | head -5 || note "(no commits ahead of origin)"
+    (cd "$MIRROR" && git log --oneline origin/$BRANCH..HEAD 2>/dev/null | head -5) || note "(no commits ahead of origin)"
 else
-    ahead=$(git rev-list --count origin/$BRANCH..HEAD 2>/dev/null || echo 0)
+    ahead=$(cd "$MIRROR" && git rev-list --count origin/$BRANCH..HEAD 2>/dev/null || echo 0)
     if [ "$ahead" = "0" ]; then
         note "Nothing to push (mirror is up to date with origin/$BRANCH)"
     else
         say "Pushing $ahead commit(s) to $REMOTE/$BRANCH..."
-        git push "$REMOTE" "$BRANCH" 2>&1 | tail -5
+        (cd "$MIRROR" && git push "$REMOTE" "$BRANCH" 2>&1 | tail -5)
     fi
 fi
 
