@@ -1,9 +1,29 @@
 #!/usr/bin/env bash
 # install.sh — Install bundled skills to Hermes root and all profiles.
+#
+# Usage:
+#   ./install.sh                 # install (copies folders)
+#   ./install.sh --dry-run       # preview what would be done, change nothing
+#
 set -euo pipefail
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+
+DRY_RUN=0
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN=1 ;;
+        -h|--help)
+            grep '^# ' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
+        *)
+            echo "Unknown arg: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
 
 if [ ! -d "$HERMES_HOME" ]; then
     echo "Error: Hermes home directory not found at $HERMES_HOME" >&2
@@ -38,13 +58,23 @@ fi
 
 for dest in "${DESTINATIONS[@]}"; do
     echo "Installing to $dest..."
-    mkdir -p "$dest"
-    for skill in "${SKILL_DIRS[@]}"; do
-        # Clean up existing file/link/dir at destination to avoid nesting/conflicts
-        rm -rf "$dest/$skill"
-        cp -R "$SCRIPT_DIR/$skill" "$dest/"
-        echo "  copied $skill"
-    done
+    if [ "$DRY_RUN" = "1" ]; then
+        for skill in "${SKILL_DIRS[@]}"; do
+            echo "  [DRY RUN] Would copy $skill to $dest"
+        done
+    else
+        mkdir -p "$dest"
+        for skill in "${SKILL_DIRS[@]}"; do
+            # Clean up existing file/link/dir at destination to avoid nesting/conflicts
+            rm -rf "$dest/$skill"
+            cp -R "$SCRIPT_DIR/$skill" "$dest/"
+            echo "  copied $skill"
+        done
+    fi
 done
 
-echo "Done! Restart Hermes gateway to load the new skills."
+if [ "$DRY_RUN" = "1" ]; then
+    echo "Dry run complete. No changes were made."
+else
+    echo "Done! Restart Hermes gateway to load the new skills."
+fi
