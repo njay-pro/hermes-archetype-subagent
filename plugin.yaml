@@ -1,0 +1,34 @@
+name: archetype-router
+version: 0.3.0
+description: |
+  OMCA archetype-specific delegation router. Exposes 5 tools that mirror
+  Hermes's native `delegate_task` but pre-fill the model, provider,
+  SOUL identity, and skill whitelist per archetype:
+
+    - delegate_task_consultant            (I — Raw Power, Frontier Stable)
+    - delegate_task_long_horizon          (II — Low-Hallucination, Stable)
+    - delegate_task_high_hallucination    (III — Creative, Lateral)
+    - delegate_task_speedster_internal    (IV — Cheap / Fast / Distilled, LOCAL FILES)
+    - delegate_task_speedster_internet    (IV — Cheap / Fast / Distilled, NETWORK)
+
+  The two speedster variants split the cheap/fast archetype by data
+  source: `speedster_internal` for local file reads (tools=[file]),
+  `speedster_internet` for URL fetches (tools=[web]). Both are sandboxed
+  by design — no terminal, no write capability.
+
+  Native delegate_task is imported untouched. Edit archetype_model_config.json
+  to retarget models. Edit archetypes.yaml for mechanical config (toolsets,
+  output_schema, max_iterations, default_disabled_skills). Edit
+  SOUL_<name>.md for persona prose — that file is the SINGLE source of
+  identity prose, NOT duplicated in the YAML.
+
+  Pairs with the OMCA skill `knows_multiAgent-promptEngineering` for
+  briefing templates and the 4-archetype taxonomy rationale.
+author: Njay + Hermes
+kind: standalone
+provides_tools:
+  - delegate_task_consultant
+  - delegate_task_long_horizon
+  - delegate_task_high_hallucination
+  - delegate_task_speedster_internal
+  - delegate_task_speedster_internet

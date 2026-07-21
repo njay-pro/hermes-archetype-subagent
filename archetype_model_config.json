@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$comment": "OMCA Archetype Router — model/provider configuration. THIS IS THE FILE YOU EDIT WHEN YOU NEED TO RETARGET AN ARCHETYPE. Each archetype points to a Honcho/9router COMBO NAME (not a direct model). 9router handles internal fallback chain + underlying model selection. The provider is `custom:9router` (registered in ~/.hermes/config.yaml). Combo names must also be registered as models in custom_providers.0.models (use `hermes config set custom_providers.0.models.<combo>.context_length <N> --force`). Plugin auto-reloads on mtime change. Identity prose lives ONLY in the SOUL_<name>.md file, NOT here.",
+  "version": "1.2.0",
+  "last_updated": "2026-07-22",
+  "last_updated_by": "njaypro",
+  "provider": "custom:9router",
+  "base_url": "http://localhost:20128/v1",
+  "_provider_notes": "9router runs locally and routes the combo name to one of the underlying models. Each combo (arc-*) has its own fallback chain INSIDE 9router (visible in the Honcho dashboard). The plugin does NOT see those internal fallbacks — 9router handles retry/upgrade/cheap-mode internally.",
+  "archetypes": {
+    "consultant": {
+      "provider": "custom:9router",
+      "model": "arc-consultant1",
+      "_comment": "Arc I — Raw Power Frontier. Combo arc-consultant1 (Honcho/9router). Underlying candidates: claude-opus-4-6-thinking, gemini-pro-agent, minimax/MiniMax-M3.",
+      "_registered_in_hermes": true
+    },
+    "long_horizon": {
+      "provider": "custom:9router",
+      "model": "arc-longHorizon1",
+      "_comment": "Arc II — Long-Horizon Stable. Combo arc-longHorizon1. Underlying: minimax/MiniMax-M3, ollama/minimax-m3, gemini-3-flash-agent.",
+      "_registered_in_hermes": true
+    },
+    "high_hallucination": {
+      "provider": "custom:9router",
+      "model": "arc-highHallucination1",
+      "_comment": "Arc III — Creative / High-Hallucination. Combo arc-highHallucination1. Underlying: nemotron-3-ultra-550b-a55b:free, nemotron-3-ultra-free, gemini-3-flash-agent. SHORT HORIZON — bounded by iteration count, not tool removal.",
+      "_registered_in_hermes": true
+    },
+    "speedster_internal": {
+      "provider": "custom:9router",
+      "model": "arc-speedster1",
+      "_comment": "Arc IVa — Cheap / Fast / Distilled, INTERNAL variant. Combo arc-speedster1. Underlying: minimax/MiniMax-M2.7-highspeed. File reads only — NO terminal, NO web.",
+      "_registered_in_hermes": true
+    },
+    "speedster_internet": {
+      "provider": "custom:9router",
+      "model": "arc-speedster1",
+      "_comment": "Arc IVb — Cheap / Fast / Distilled, NETWORK variant. Combo arc-speedster1 (same combo as IVa; 9router handles cost mode per call). Web fetches only — NO terminal, NO file. To split cost-mode behavior, register a separate `arc-speedster1-internet` combo in 9router and update this field.",
+      "_registered_in_hermes": true,
+      "_open_issue": "speedster_internal and speedster_internet currently point to the same arc-speedster1 combo. If you want them to be different cost modes (e.g. one cheaper), create separate combos in 9router's Honcho dashboard and update the model fields."
+    }
+  },
+  "_override_examples": {
+    "$comment": "Common retargeting scenarios. Edit the archetypes block above — do not edit this _override_examples block (it's documentation).",
+    "swap_consultant_to_gemini": {
+      "archetypes": {
+        "consultant": {"provider": "custom:9router", "model": "arc-consultant1"}
+      },
+      "_note": "Reorder via 9router's internal combo config, not here. To change which model arc-consultant1 prefers, edit it inside 9router's Honcho dashboard."
+    },
+    "register_a_new_combo": [
+      "1. Create the combo in 9router's Honcho dashboard (e.g. 'arc-realtime1')",
+      "2. Register it in Hermes: hermes config set custom_providers.0.models.arc-realtime1.context_length 1000000 --force",
+      "3. Add an entry in archetypes.yaml and a new tool in plugin.yaml's provides_tools",
+      "4. Write a SOUL_<name>.md identity file",
+      "5. Add the entry to this JSON's archetypes block",
+      "6. Plugin auto-reloads on next call"
+    ]
+  }
+}
