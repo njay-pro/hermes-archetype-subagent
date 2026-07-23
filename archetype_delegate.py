@@ -281,6 +281,7 @@ def _build_child_agent_mimic(
     parent_agent: Any,
     model_override: Optional[Dict[str, str]] = None,
     task_index: int = 0,
+    real_goal: str = "",
 ) -> Any:
     """Instantiate a child AIAgent directly with explicit archetype credentials and prompt.
 
@@ -352,7 +353,7 @@ def _build_child_agent_mimic(
     # _wrap_for_live_transcript) gives us a stable handle on the writer
     # AND the delegation_id without relying on closure introspection.
     live_writer, live_log_path = _open_live_transcript(
-        spec.name, task_index, real_goal=brief
+        spec.name, task_index, real_goal=real_goal or brief
     )
     _delegation_id: Optional[str] = None
     if live_log_path is not None:
@@ -633,6 +634,7 @@ def archetype_delegate(
     role: str = "leaf",
     background: bool = False,
     model_override: Optional[Dict[str, str]] = None,
+    real_goal: str = "",
 ) -> Any:
     """Spawn a child AIAgent in-memory with archetype model & provider credentials.
 
@@ -646,6 +648,7 @@ def archetype_delegate(
         toolsets=toolsets,
         parent_agent=parent_agent,
         model_override=model_override,
+        real_goal=real_goal,
     )
 
     logger.info(

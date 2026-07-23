@@ -34,6 +34,7 @@ class TestArchetypeDelegateMimic:
                 toolsets=["terminal", "file", "web"],
                 parent_agent=fake_parent_agent,
                 model_override=None,
+                real_goal="",
             )
 
     def test_delegates_with_model_override(
@@ -61,6 +62,7 @@ class TestArchetypeDelegateMimic:
                 toolsets=["terminal", "file", "web"],
                 parent_agent=fake_parent_agent,
                 model_override=override,
+                real_goal="",
             )
 
     def test_raises_when_creds_cannot_be_resolved(

@@ -963,6 +963,7 @@ def _make_handler(archetype_name: str):
                     parent_agent=parent_agent,
                     role=t_role,
                     background=bool(background),
+                    real_goal=t_goal,
                 )
 
             with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
@@ -982,6 +983,7 @@ def _make_handler(archetype_name: str):
             parent_agent=parent_agent,
             role=role or "leaf",
             background=bool(background),
+            real_goal=goal or "",
         )
 
     handler.__name__ = f"_delegate_task_{archetype_name}"
