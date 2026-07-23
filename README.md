@@ -108,6 +108,22 @@ Restart Hermes. See [docs/SKILLS.md](docs/SKILLS.md) for details.
 
 ---
 
+## Speedster is narrow on purpose
+
+`delegate_task_speedster_internal` and `delegate_task_speedster_internet`
+are intentionally narrow. They are **deterministic, single-pass
+extraction** agents — feed them a pre-shaped `STEP 1, STEP 2, ...` tree
+and they execute it. Feed them an open-ended goal like "audit this
+codebase" and they return `EXECUTION_FAILURE / NO_EXECUTION_TREE_PROVIDED`
+because their SOUL explicitly rejects that shape.
+
+This is **correct behavior, not a bug.** If you need open-ended analysis,
+use `delegate_task_consultant` or `delegate_task_long_horizon` instead.
+See [SOUL_speedster_internet.md](SOUL_speedster_internet.md) for the
+full briefing discipline.
+
+---
+
 ## Anti-patterns (operator quick-reference)
 
 ❌ **Using one archetype for everything** — collapses the cost/latency
@@ -136,6 +152,40 @@ every combo MUST be registered. See
   mutations. 9router combo routing. Live transcripts. Speedster split
   into internal/internet. `high_hallucination` full surface, short
   horizon.
+- **0.3.2** — `child_session_id` wiring + native `_active_subagents`
+  registration for TUI preview pane. Optional web preview pane
+  (`dashboard.py`, see below).
+
+---
+
+## Optional: Web Preview Pane
+
+`dashboard.py` is a single-file, stdlib-only web server that reads
+`~/.hermes/cache/delegation/live/*/manifest.json` + `task-*.log` and
+renders every delegation (native AND plugin) in a single page.
+
+```bash
+python dashboard.py             # serves on http://127.0.0.1:8765
+python dashboard.py --port 9000 # custom port
+python dashboard.py --no-clear  # skip the startup prune of old delegations
+```
+
+What you get:
+- **Timeline** of all delegations (newest first), with status badge +
+  goal preview
+- **Detail view** of the selected delegation, with live transcript
+  streaming (SSE; auto-tail mode for running ones)
+- **Zero dependencies** — Python 3.9+ stdlib only. No `pip install`
+  needed. `Ctrl+C` to stop.
+
+It works for both `delegate_task` (native) and the 5 archetype tools
+(consultant, long_horizon, high_hallucination, speedster_internal,
+speedster_internet) because both write to the same on-disk format.
+
+**Note:** the plugin currently writes the goal as
+`[consultant] (live transcript)` (a placeholder) instead of the real goal.
+The dashboard shows whatever is in the log — the real goal for native,
+the placeholder for plugin delegations. Fix tracked in v0.3.2 TODO.
 
 ---
 

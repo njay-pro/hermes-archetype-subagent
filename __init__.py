@@ -84,6 +84,17 @@ def __getattr__(name: str):  # PEP 562 — module-level __getattr__
         _plugin_dir = Path(__file__).resolve().parent
         _router_path = _plugin_dir / "router.py"
 
+        # Put the plugin dir on sys.path so that the lazy
+        # `from archetype_delegate import archetype_delegate` inside
+        # router.py's handler closure resolves cleanly. Without this, the
+        # handler raises ModuleNotFoundError on first dispatch because
+        # spec_from_file_location does NOT add the plugin dir to sys.path.
+        # Insert at front so the plugin's modules win over any same-named
+        # modules elsewhere on the path.
+        _plugin_dir_str = str(_plugin_dir)
+        if _plugin_dir_str not in sys.path:
+            sys.path.insert(0, _plugin_dir_str)
+
         # Use a stable module name so subsequent calls hit the import cache
         _router_module_name = "_archetype_router_internal"
         if _router_module_name not in sys.modules:

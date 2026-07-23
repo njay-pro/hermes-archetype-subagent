@@ -16,13 +16,14 @@
 | Understand what this plugin does | [README.md](README.md) | — |
 | Understand how it works | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | `archetype_delegate.py`, `router.py` |
 | Edit config | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | `archetype_model_config.json`, `archetypes.yaml`, `SOUL_*.md` |
-| Add a new archetype | [docs/EXTENDING.md](docs/EXTENDING.md#adding-a-new-archetype) | 5 files (see recipe) |
-| Add a new skill to the plugin's bundle | [docs/SKILLS.md](docs/SKILLS.md#adding-a-new-skill-to-this-folder) | `docs/skills/your_skill/SKILL.md` |
+| Add a new archetype | [docs/EXTENDING.md](docs/EXTENDING.md) | 5 files (see recipe) |
+| Add a new skill to the plugin's bundle | [docs/SKILLS.md](docs/SKILLS.md) | `docs/skills/your_skill/SKILL.md` |
 | Look up a public function | [docs/API.md](docs/API.md) | `router.py`, `archetype_delegate.py` |
 | Run / write tests | [docs/TESTING.md](docs/TESTING.md) | `tests/` |
 | Debug a live delegation | [docs/DEBUGGING.md](docs/DEBUGGING.md) | — |
 | Decide native vs plugin | [docs/CAPABILITIES.md](docs/CAPABILITIES.md) | — |
 | Plan a feature | [docs/ROADMAP.md](docs/ROADMAP.md) | — |
+| Run the web preview pane | [DASHBOARD_PLAN.md](DASHBOARD_PLAN.md) | `dashboard.py` |
 
 ---
 

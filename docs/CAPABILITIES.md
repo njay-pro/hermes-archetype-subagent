@@ -12,10 +12,10 @@
 | Per-archetype model override | ❌ no `model=` kwarg | ✅ via `archetype_model_config.json` |
 | Per-archetype SOUL identity | ❌ manual injection | ✅ auto-injected from SOUL_*.md |
 | Per-archetype skill whitelist | ❌ no model-facing arg | ✅ via plugin tool params |
-| Per-archetype toolset restriction | ❌ no `toolsets=` kwarg | ✅ by mutating `parent.enabled_toolsets` |
+| Per-archetype toolset restriction | ❌ no `toolsets=` kwarg | ✅ passes `enabled_toolsets=clean_toolsets` to child AIAgent |
 | Live transcript log | ✅ `cache/delegation/live/` | ✅ Same path via `create_live_transcripts` |
-| `parent.enabled_toolsets` mutation | ✅ yes | ✅ yes (then restored) |
-| Concurrent batching | ✅ multi-task in one call | ❌ one task per call (loop in handler) |
+| Child AIAgent toolset wiring | ✅ passed via AIAgent constructor | ✅ passed via `enabled_toolsets=` (parent is NOT mutated) |
+| Concurrent batching | ✅ multi-task in one call | ✅ multi-task in one call (v0.3.1 ThreadPoolExecutor parallel) |
 | Spawn pause/kill switch | ✅ `is_spawn_paused()` | ❌ delegated to AIAgent's own loop |
 | Role normalization | ✅ `_normalize_role` | ⚠️ accepts `role=` but doesn't enforce |
 | Result aggregation | ✅ batch joins | ❌ one result per call |

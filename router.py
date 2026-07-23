@@ -325,6 +325,12 @@ def _resolve_skill_roots() -> List[Path]:
     Honours $HERMES_SKILL_ROOTS (colon-separated) when set — useful for tests
     and for forcing isolation. Otherwise falls back to the standard locations
     the native delegate_task would also search.
+
+    v0.3.1: also reads `skills.external_dirs` from every
+    `~/.hermes/profiles/*/config.yaml` so the plugin honours Hermes's
+    official skill-discovery extension point. Previously the plugin only
+    walked 3 hard-coded paths; skills placed in a non-standard
+    external_dirs were silently invisible. See TODO.md v0.3.1 bug #3.
     """
     env = os.getenv(_HERMES_SKILL_ROOTS_ENV, "").strip()
     if env:
@@ -342,10 +348,85 @@ def _resolve_skill_roots() -> List[Path]:
             sp = ws / ".opencode" / "skills"
             if sp.is_dir():
                 candidates.append(sp)
+
+    # Read external_dirs from every profile's config.yaml.
+    # Use minimal YAML parsing here (no PyYAML needed for a single
+    # top-level key whose value is a list of strings).
+    prof_root = home / ".hermes" / "profiles"
+    if prof_root.is_dir():
+        for cfg_path in prof_root.glob("*/config.yaml"):
+            try:
+                cfg_text = cfg_path.read_text(encoding="utf-8")
+                ext_dirs = _extract_external_dirs(cfg_text)
+            except Exception as exc:
+                logger.debug("Could not read %s for external_dirs: %s", cfg_path, exc)
+                continue
+            for ext in ext_dirs:
+                p = Path(ext).expanduser()
+                if p.is_dir():
+                    candidates.append(p)
+
     for c in candidates:
         if c.is_dir():
             roots.append(c)
     return roots
+
+
+def _extract_external_dirs(yaml_text: str) -> List[str]:
+    """Minimal extractor for `skills.external_dirs: [a, b, c]` blocks.
+
+    Only handles the exact shape we expect:
+      skills:
+        external_dirs:
+          - /path/one
+          - /path/two
+    Returns an empty list on any parse failure — never raises.
+    """
+    out: List[str] = []
+    lines = yaml_text.splitlines()
+    in_skills = False
+    in_external = False
+    for raw in lines:
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # Detect entering the skills: block
+        if not in_skills:
+            if stripped == "skills:" or stripped.startswith("skills:"):
+                in_skills = True
+            continue
+        # Inside skills: — look for external_dirs:
+        if not in_external:
+            if "external_dirs" in stripped:
+                # Two shapes: `external_dirs:` (list follows on next lines)
+                # or `external_dirs: [a, b]` (inline list).
+                if stripped.endswith(":"):
+                    in_external = True
+                    # Same-line list possible: external_dirs: [a, b]
+                    if "[" in stripped and "]" in stripped:
+                        inner = stripped.split("[", 1)[1].rsplit("]", 1)[0]
+                        for item in inner.split(","):
+                            item = item.strip().strip("'\"")
+                            if item:
+                                out.append(item)
+                        in_external = False
+                elif "[" in stripped and "]" in stripped and ":" in stripped.split("[", 1)[0]:
+                    # `external_dirs: [a, b]` without trailing colon after the bracket
+                    inner = stripped.split("[", 1)[1].rsplit("]", 1)[0]
+                    for item in inner.split(","):
+                        item = item.strip().strip("'\"")
+                        if item:
+                            out.append(item)
+            continue
+        # Inside external_dirs: — read list items
+        if stripped.startswith("- "):
+            item = stripped[2:].strip().strip("'\"")
+            if item:
+                out.append(item)
+        elif stripped.endswith(":"):
+            # A different key under skills: — stop reading external_dirs
+            in_external = False
+    return out
 
 
 def _list_all_skills(roots: List[Path]) -> List[str]:
@@ -414,6 +495,22 @@ def resolve_skill_filter(
     return sorted(candidates)
 
 
+# v0.3.3 SG3: the L1 (code-level) baseline for the skill universe.
+# Default = all OMCA utility skills (knows_*, nodes_*, subflows_*, omca-*).
+# Matches the convention used by the omca-ebook profile — see the
+# memory entry "njaypro is using the omca-ebook profile to read all
+# skills matching omca-*, omca_*, knows_*, nodes_*, subflows_*".
+# Per-archetype config and per-call orchestrator override still narrow
+# further on top of this baseline.
+DEFAULT_OMCA_UTILS_GLOBS: List[str] = [
+    "knows_*",
+    "nodes_*",
+    "subflows_*",
+    "omca-*",
+    "omca_*",
+]
+
+
 def resolve_orchestrator_skill_filter(
     skill_include_override: Optional[List[str]],
     skill_exclude_override: Optional[List[str]],
@@ -421,17 +518,23 @@ def resolve_orchestrator_skill_filter(
 ) -> List[str]:
     """Apply the orchestrator's per-call skill decisions.
 
-    Resolution order (orchestrator decides; config file only adds a default-disable safety net):
-      1. Start with the FULL skill catalog.
-      2. ALWAYS subtract `default_disabled_skills` from archetypes.yaml.
-         This is the safety net — context-pollution-prone skills are off by default.
-      3. If orchestrator passed `skill_include_override`:
-         - WHITELIST MODE: only those skills remain. Orchestrator can opt back in
-           to a default-disabled skill by including its name (e.g. include
-           "knows_honcho-best-practice" re-enables it).
-      4. Else if orchestrator passed `skill_exclude_override`:
-         - BLACKLIST MODE: subtract those too on top of the default-disabled list.
-      5. Else: full catalog minus default_disabled_skills.
+    3-LAYER SKILL RESOLUTION (v0.3.3 SG3):
+      L1 (code-level baseline): start with the OMCA utils catalog
+          (knows_*, nodes_*, subflows_*, omca-*). Defined in
+          DEFAULT_OMCA_UTILS_GLOBS. This is the default for ALL archetype
+          delegations and replaces the previous "load everything" baseline.
+      L2 (config safety net): ALWAYS subtract `default_disabled_skills`
+          from archetypes.yaml. Currently `honcho-*` is disabled by default
+          because Honcho memory helpers are context-pollution-prone in
+          narrow subagent tasks. (Config file lives in archetypes.yaml.)
+      L3 (orchestrator override):
+        - skill_include_override: WHITELIST MODE. Only matching skills
+          remain. The explicit include RE-ENABLES disabled skills for
+          this call (documented "opt back in" path).
+        - skill_exclude_override: BLACKLIST MODE. Subtract matching skills
+          on top of L1+L2.
+
+    Resolution order: L1 → L2 → L3. Each layer narrows the previous.
 
     Returns the sorted list of skill names the subagent should see.
     """
@@ -441,22 +544,35 @@ def resolve_orchestrator_skill_filter(
     if not all_skills:
         return []
 
-    # Step 2: always subtract default-disabled
-    disabled = set(get_default_disabled_skills())
-    candidates = all_skills - {s for s in all_skills if any(_match_skill_glob(s, p) for p in disabled)}
+    # Step 1 (L1): start with OMCA utils, not the full catalog.
+    # This is the default for archetype-based subagents.
+    candidates = {
+        s for s in all_skills
+        if any(_match_skill_glob(s, glob) for glob in DEFAULT_OMCA_UTILS_GLOBS)
+    }
 
-    # Step 3: orchestrator passed an explicit include list -> whitelist mode
+    # Step 2 (L2): always subtract config-level default-disabled.
+    disabled = set(get_default_disabled_skills())
+    candidates -= {
+        s for s in candidates if any(_match_skill_glob(s, p) for p in disabled)
+    }
+
+    # Step 3 (L3a): orchestrator passed an explicit include list -> whitelist mode
     if skill_include_override:
-        include_set = {s for s in all_skills if any(_match_skill_glob(s, p) for p in skill_include_override)}
+        include_set = {
+            s for s in all_skills
+            if any(_match_skill_glob(s, p) for p in skill_include_override)
+        }
         # The orchestrator's explicit include RE-ENABLES disabled skills for this call.
         # This is the documented "opt back in" path: passing a skill name explicitly
         # in skill_include_override overrides the default_disabled safety net for that name.
         candidates = include_set
-    # Step 4: orchestrator passed an explicit exclude list -> blacklist mode
+    # Step 4 (L3b): orchestrator passed an explicit exclude list -> blacklist mode
     elif skill_exclude_override:
-        candidates -= {s for s in candidates if any(_match_skill_glob(s, p) for p in skill_exclude_override)}
-
-    # Step 5: neither — full catalog minus default-disabled (already handled above)
+        candidates -= {
+            s for s in candidates
+            if any(_match_skill_glob(s, p) for p in skill_exclude_override)
+        }
 
     return sorted(candidates)
 
@@ -480,22 +596,44 @@ def _assemble_brief(
     skill_filter: List[str],
     output_schema_override: Optional[dict] = None,
     include_model_block: bool = True,
+    preload_files: Optional[List[str]] = None,
 ) -> str:
     """Compose the full prompt the subagent will see as its goal+context.
 
     Structure (each section is separated by '---'):
+      <PRIORITY header — declares this brief overrides any default role framing>
       <SOUL — persistent identity from SOUL_<name>.md>
       <model — provider/model from JSON (optional, helps subagent self-identify)>
       <goal — from orchestrator>
       <context — from orchestrator (optional)>
+      <preloaded_files — content of preload_files slot (optional)>
       <skill_filter — list of skills visible to this subagent>
       <output_schema — if specified, embedded as a JSON contract>
 
     Note: briefing_intro has been merged into SOUL_<name>.md to eliminate
     duplication. The SOUL file is the single source of identity prose.
+
+    v0.3.3 SG2: a PRIORITY header is prepended to the brief. This tells the
+    subagent that everything below the header supersedes any default role
+    framing the runtime may have added (e.g. AIAgent's built-in
+    "you are a helpful AI..." prefix). The SOUL section is the canonical
+    role, not the runtime's fallback.
     """
     soul = _read_soul(spec)
     parts: List[str] = []
+
+    # v0.3.3 SG2: PRIORITY header. Prepended to everything else so the
+    # model attends to it first. Explains that the SOUL below is the
+    # canonical role and any default "helpful AI assistant" framing is
+    # a runtime artifact to be ignored.
+    parts.append(
+        "## PRIORITY\n"
+        "The following brief is the canonical instructions for this subagent. "
+        "If any default role framing from the runtime contradicts what is "
+        "below (for example, a generic 'helpful AI assistant' preamble), "
+        "follow the role, audience, and behavior defined in the SOUL section "
+        "below — not the runtime default. The SOUL is authoritative."
+    )
 
     if soul:
         parts.append(soul)
@@ -508,14 +646,56 @@ def _assemble_brief(
             f"This is the configured model for the {spec.name} archetype."
         )
 
+    # Defensive coercion: MCP tool layers sometimes serialize string
+    # params as dicts (e.g. {"context": "..."}). Normalize to str before
+    # .strip() so the briefing never crashes on a non-string input.
+    def _coerce_str(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            # Common case: {"context": "..."} or {"goal": "..."} — extract
+            # the first string value we find.
+            for v in value.values():
+                if isinstance(v, str):
+                    return v
+            return str(value)
+        return str(value)
+
+    goal_str = _coerce_str(goal)
+    context_str = _coerce_str(context)
+
     parts.append("---")
     parts.append("## Goal (from orchestrator)")
-    parts.append(goal.strip() if goal else "(no goal provided)")
+    parts.append(goal_str.strip() if goal_str else "(no goal provided)")
 
-    if context:
+    if context_str:
         parts.append("---")
         parts.append("## Context (from orchestrator)")
-        parts.append(context.strip())
+        parts.append(context_str.strip())
+
+    # v0.3.3 SG4: Preloaded Files section. Reads each file from disk and
+    # inlines its content into the brief. Absolute paths only. 100KB cap
+    # per file, 1MB cap total. Errors are surfaced as "(load failed: ...)"
+    # text so the subagent knows the file was supposed to be there.
+    if preload_files:
+        # Reset per-delegation preload budget at the START of this
+        # section (once per _assemble_brief call). Subsequent file
+        # reads accumulate against this budget.
+        _read_preload_file._total_bytes = 0  # type: ignore[attr-defined]
+        parts.append("---")
+        parts.append("## Preloaded Files")
+        parts.append(
+            "The orchestrator preloaded these files for you. Their content "
+            "is inlined below. You can use this as context, reference, or raw "
+            "data — depending on the goal above."
+        )
+        for path_str in preload_files:
+            content = _read_preload_file(path_str)
+            file_name = path_str.split("/")[-1] if "/" in path_str else path_str
+            parts.append(f"### `{file_name}`")
+            parts.append(content)
 
     parts.append("---")
     parts.append("## Available Skills")
@@ -541,6 +721,67 @@ def _assemble_brief(
         )
 
     return "\n\n".join(parts)
+
+
+# v0.3.3 SG4: Preload file caps. Tuned conservatively — a single 100KB file is
+# already 25K-50K tokens of context once it goes through the model.
+# The 1MB total cap means you can pre-load ~10 reasonable files before
+# the brief itself starts dominating the context window.
+_PRELOAD_MAX_FILE_BYTES = 100 * 1024      # 100 KB per file
+_PRELOAD_MAX_TOTAL_BYTES = 1024 * 1024   # 1 MB total per delegation
+
+
+def _read_preload_file(path_str: str) -> str:
+    """Read a preload file and return its content as a string.
+
+    v0.3.3 SG4: best-effort. Errors are surfaced as text the subagent
+    sees, so it knows the file was supposed to be there but couldn't load.
+    No exception escapes — this is called from inside _assemble_brief
+    which must not crash on a missing file.
+
+    Caps: 100KB per file, 1MB total per delegation. Excess content is
+    truncated with a `[... truncated at N bytes ...]` marker so the
+    subagent knows there's more if it asks.
+
+    The per-delegation total byte counter is reset by the caller
+    (once per _assemble_brief call) so budgets don't leak across briefs.
+    """
+    try:
+        p = Path(path_str).expanduser()
+        if not p.is_file():
+            return f"(load failed: file not found: {path_str})"
+        size = p.stat().st_size
+        if size > _PRELOAD_MAX_FILE_BYTES:
+            with p.open("r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read(_PRELOAD_MAX_FILE_BYTES)
+            content += (
+                f"\n\n[... truncated at "
+                f"{_PRELOAD_MAX_FILE_BYTES // 1024}KB of "
+                f"{size // 1024}KB total ...]"
+            )
+        else:
+            content = p.read_text(encoding="utf-8", errors="replace")
+        # Per-delegation total cap
+        if _read_preload_file._total_bytes + len(content) > _PRELOAD_MAX_TOTAL_BYTES:  # type: ignore[attr-defined]
+            return (
+                f"(preload skipped: would exceed total budget "
+                f"{_PRELOAD_MAX_TOTAL_BYTES // 1024}KB; "
+                f"already used {_read_preload_file._total_bytes // 1024}KB)"  # type: ignore[attr-defined]
+            )
+        _read_preload_file._total_bytes += len(content)  # type: ignore[attr-defined]
+        return content
+    except (OSError, UnicodeDecodeError) as exc:
+        return f"(load failed: {type(exc).__name__}: {exc})"
+
+
+# Ensure the counter attribute exists at import time
+_read_preload_file._total_bytes = 0  # type: ignore[attr-defined]
+
+
+def reset_preload_budget() -> None:
+    """Reset the per-delegation preload byte counter. Called by the handler
+    wrapper at the start of each delegation so budgets don't leak across calls."""
+    _read_preload_file._total_bytes = 0  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------
@@ -649,14 +890,25 @@ def _make_handler(archetype_name: str):
         skill_include_override: Optional[List[str]] = None,
         skill_exclude_override: Optional[List[str]] = None,
         model_override: Optional[Dict[str, str]] = None,
+        # v0.3.3 SG4: list of absolute file paths to preload into the brief.
+        # Each file is read and its content inlined into a "## Preloaded Files"
+        # section. 100KB per file, 1MB total per delegation. Best-effort —
+        # missing files surface as text in the brief, not exceptions.
+        preload_files: Optional[List[str]] = None,
         **extra: Any,
-    ) -> str:
-        """Delegate to the named archetype. Same shape as native delegate_task."""
+    ) -> Any:
+        """Delegate to the named archetype. Same shape as native delegate_task.
+
+        Returns str for single-task mode, list for batch (tasks=[...]) mode.
+        """
         spec = get_archetype(archetype_name)
 
         # Apply per-call model override (rare escape hatch)
         if model_override:
             spec = apply_model_override(spec, model_override)
+
+        # Reset preload budget at the start of every delegation
+        reset_preload_budget()
 
         # Skill resolution — orchestrator decides per call
         skill_filter = resolve_orchestrator_skill_filter(
@@ -675,18 +927,35 @@ def _make_handler(archetype_name: str):
 
         if tasks:
             # Batch mode: apply the archetype uniformly to every task.
-            # Each task runs as its own child via separate calls (no native
-            # batch — we get per-call config snapshot/restore for free).
-            results = []
-            for t in tasks:
+            # v0.3.1: dispatch in PARALLEL via ThreadPoolExecutor (matches
+            # native delegate_task's behaviour). Previously this looped
+            # sequentially, silently serialising work that callers expected
+            # to run concurrently. See TODO.md v0.3.1 bug #1.
+            from concurrent.futures import ThreadPoolExecutor
+
+            # Cap concurrency: never spawn more workers than tasks, and
+            # never more than delegation.max_concurrent_children (matches
+            # native's safety bound). Fall back to len(tasks) if not set.
+            try:
+                max_workers = min(
+                    len(tasks),
+                    int(os.getenv("HERMES_MAX_CONCURRENT_CHILDREN", str(len(tasks))))
+                    if os.getenv("HERMES_MAX_CONCURRENT_CHILDREN", "").isdigit()
+                    else len(tasks),
+                )
+            except Exception:
+                max_workers = len(tasks)
+
+            def _run_one(t: Dict[str, Any]) -> Any:
                 t_goal = t.get("goal", "")
                 t_context = t.get("context", "")
                 t_role = t.get("role", role) or "leaf"
                 t_max = t.get("max_iterations") or budget
                 brief = _assemble_brief(
-                    spec, t_goal, t_context, skill_filter, output_schema_override
+                    spec, t_goal, t_context, skill_filter, output_schema_override,
+                    preload_files=preload_files,
                 )
-                r = _arch_delegate(
+                return _arch_delegate(
                     spec=spec,
                     brief=brief,
                     context=t_context,
@@ -695,12 +964,15 @@ def _make_handler(archetype_name: str):
                     role=t_role,
                     background=bool(background),
                 )
-                results.append(r)
+
+            with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
+                results = list(ex.map(_run_one, tasks))
             return results
 
         # Single task
         brief = _assemble_brief(
-            spec, goal or "", context, skill_filter, output_schema_override
+            spec, goal or "", context, skill_filter, output_schema_override,
+            preload_files=preload_files,
         )
         return _arch_delegate(
             spec=spec,
@@ -826,6 +1098,18 @@ _BASE_PARAMETERS: Dict[str, Any] = {
                 "model": {"type": "string"},
             },
             "required": ["provider", "model"],
+        },
+        "preload_files": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "v0.3.3 SG4: list of absolute file paths to preload into the brief. "
+                "Each file is read and its content inlined into a '## Preloaded Files' "
+                "section the subagent sees. Useful for TODO.md, raw-meeting-transcripts, "
+                "design specs, or any reference material the subagent needs upfront. "
+                "Caps: 100KB per file, 1MB total per delegation. Best-effort — missing "
+                "or oversized files surface as text in the brief, not exceptions."
+            ),
         },
     },
     "required": [],
