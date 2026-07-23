@@ -339,7 +339,7 @@ def _build_child_agent_mimic(
 
     child_progress_cb, child_thinking_cb, stream_relay = _setup_progress_callbacks(
         task_index=task_index,
-        goal=brief,
+        goal=real_goal or brief,
         parent_agent=parent_agent,
         subagent_id=subagent_id,
         model=creds["model"],
