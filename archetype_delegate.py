@@ -635,6 +635,7 @@ def archetype_delegate(
     background: bool = False,
     model_override: Optional[Dict[str, str]] = None,
     real_goal: str = "",
+    task_index: int = 0,
 ) -> Any:
     """Spawn a child AIAgent in-memory with archetype model & provider credentials.
 
@@ -649,6 +650,7 @@ def archetype_delegate(
         parent_agent=parent_agent,
         model_override=model_override,
         real_goal=real_goal,
+        task_index=task_index,
     )
 
     logger.info(

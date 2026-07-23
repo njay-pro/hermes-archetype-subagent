@@ -27,7 +27,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -946,7 +946,8 @@ def _make_handler(archetype_name: str):
             except Exception:
                 max_workers = len(tasks)
 
-            def _run_one(t: Dict[str, Any]) -> Any:
+            def _run_one(item: Tuple[int, Dict[str, Any]]) -> Any:
+                idx, t = item
                 t_goal = t.get("goal", "")
                 t_context = t.get("context", "")
                 t_role = t.get("role", role) or "leaf"
@@ -964,10 +965,11 @@ def _make_handler(archetype_name: str):
                     role=t_role,
                     background=bool(background),
                     real_goal=t_goal,
+                    task_index=idx,
                 )
 
             with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
-                results = list(ex.map(_run_one, tasks))
+                results = list(ex.map(_run_one, enumerate(tasks)))
             return results
 
         # Single task

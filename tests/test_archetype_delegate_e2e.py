@@ -35,6 +35,7 @@ class TestArchetypeDelegateMimic:
                 parent_agent=fake_parent_agent,
                 model_override=None,
                 real_goal="",
+                task_index=0,
             )
 
     def test_delegates_with_model_override(
@@ -63,6 +64,7 @@ class TestArchetypeDelegateMimic:
                 parent_agent=fake_parent_agent,
                 model_override=override,
                 real_goal="",
+                task_index=0,
             )
 
     def test_raises_when_creds_cannot_be_resolved(
