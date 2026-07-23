@@ -496,6 +496,28 @@ skills:
         assert "write tests" in brief
         assert "ship v0.3.3" in brief
 
+    def test_sg4_relative_path_resolves(self, tmp_path):
+        """v0.3.3 SG4: relative paths resolve relative to current working directory."""
+        import os
+        from router import _assemble_brief, get_archetype
+        spec = get_archetype("consultant")
+        rel_file = "relative_test_file.txt"
+        
+        # Write to CWD temp path but keep it relative to CWD
+        orig_cwd = os.getcwd()
+        os.chdir(str(tmp_path))
+        try:
+            p = tmp_path / rel_file
+            p.write_text("this is relative content")
+            brief = _assemble_brief(
+                spec, "review", None, ["knows_*"],
+                preload_files=[rel_file],
+            )
+            assert "relative_test_file.txt" in brief
+            assert "this is relative content" in brief
+        finally:
+            os.chdir(orig_cwd)
+
     def test_sg4_brief_handles_multiple_preloaded_files(self, tmp_path):
         """v0.3.3 SG4: preload_files with 2 files — both should be inlined."""
         from router import _assemble_brief, get_archetype

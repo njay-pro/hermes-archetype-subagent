@@ -734,10 +734,10 @@ _PRELOAD_MAX_TOTAL_BYTES = 1024 * 1024   # 1 MB total per delegation
 def _read_preload_file(path_str: str) -> str:
     """Read a preload file and return its content as a string.
 
-    v0.3.3 SG4: best-effort. Errors are surfaced as text the subagent
-    sees, so it knows the file was supposed to be there but couldn't load.
-    No exception escapes — this is called from inside _assemble_brief
-    which must not crash on a missing file.
+    v0.3.3 SG4: best-effort. Resolves paths intelligently:
+      1. Absolute path: used as-is.
+      2. Relative path: tries relative to current working directory (Path.cwd() / path).
+      3. Fallback: tries relative to the home directory if ~ is used.
 
     Caps: 100KB per file, 1MB total per delegation. Excess content is
     truncated with a `[... truncated at N bytes ...]` marker so the
@@ -747,9 +747,16 @@ def _read_preload_file(path_str: str) -> str:
     (once per _assemble_brief call) so budgets don't leak across briefs.
     """
     try:
+        # Resolve the path intelligently
         p = Path(path_str).expanduser()
+        if not p.is_absolute():
+            # Try relative to the current working directory first
+            cwd_path = Path.cwd() / path_str
+            if cwd_path.is_file():
+                p = cwd_path
+
         if not p.is_file():
-            return f"(load failed: file not found: {path_str})"
+            return f"(load failed: file not found: {path_str} [attempted: {p}])"
         size = p.stat().st_size
         if size > _PRELOAD_MAX_FILE_BYTES:
             with p.open("r", encoding="utf-8", errors="replace") as fh:
