@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.5 (2026-07-31) — "Collapsed-Argument Recovery"
+
+**Fixed:**
+- **Defeated skill overrides via tool-call bridge.** Some invocation paths
+  (notably the JSON `tool_call` bridge) serialize the *entire* arguments object
+  into the first positional parameter (`goal`). The handler then received
+  `goal={"goal": "...", "skill_include_override": [...]}` while the named
+  `skill_include_override` / `skill_exclude_override` params arrived as `None`.
+  The resolver silently fell back to the full OMCA catalog (47 skills), so
+  per-call skill isolation was silently defeated — the subagent saw everything
+  regardless of the requested whitelist.
+- The handler now detects a dict-shaped `goal`, recovers every structured field
+  from it (`skill_include_override`, `skill_exclude_override`, `context`,
+  `max_iterations`, `role`, `background`, `output_schema_override`,
+  `model_override`, `preload_files`, `tasks`), and logs the recovery. Named
+  params still take precedence when both are present. Resolver + brief builder
+  were already correct; only the arg-recovery path was missing.
+
 ## 0.4.4 (2026-07-31) — "Construction-Time Prompt Isolation"
 
 **Fixed:**

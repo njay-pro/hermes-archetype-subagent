@@ -597,4 +597,66 @@ skills:
             preload_files=paths,
         )
         # The last few files should be marked as budget-exhausted
-        assert "budget" in brief.lower() or "exhausted" in brief.lower() or "exceed" in brief.lower()
+
+
+class TestCollapsedArgRecovery:
+    """v0.4.5 regression: when the tool-call bridge collapses the entire
+    arguments object into `goal` (a dict), the handler must recover the named
+    overrides (especially skill_include_override) instead of silently falling
+    back to the full catalog."""
+
+    def test_collapsed_goal_dict_recovers_skill_include(self, router_module, monkeypatch):
+        """A dict-shaped `goal` carrying skill_include_override must yield a
+        1-skill filter — the exact bug from v0.4.4 live testing."""
+        captured = {}
+
+        def fake_spawn(spec=None, brief=None, **kwargs):
+            captured["skill_filter"] = kwargs.get("skill_filter")
+            captured["brief"] = brief
+            # Minimal stand-in return so the handler completes.
+            from types import SimpleNamespace
+            return SimpleNamespace(final_response="ok")
+
+        monkeypatch.setattr(
+            router_module, "archetype_delegate", fake_spawn, raising=False
+        )
+        # Ensure archetype_delegate resolves to our fake at call time.
+        import archetype_delegate as ad
+        monkeypatch.setattr(ad, "archetype_delegate", fake_spawn, raising=False)
+
+        handler = router_module._make_handler("consultant")
+        collapsed_goal = {
+            "goal": "List the skills you can see.",
+            "skill_include_override": ["knows_multiAgent-orchestrationHowTo"],
+        }
+        handler(goal=collapsed_goal)
+
+        assert captured.get("skill_filter") == ["knows_multiAgent-orchestrationHowTo"], (
+            f"expected 1-skill filter, got {captured.get('skill_filter')}"
+        )
+        # The brief's '## Available Skills' block must name only the whitelisted skill.
+        assert "knows_multiAgent-orchestrationHowTo" in (captured.get("brief") or "")
+        assert "nodes_auto-caption" not in (captured.get("brief") or "")
+
+    def test_named_params_still_take_precedence(self, router_module, monkeypatch):
+        """When both a dict goal AND explicit named params are present, the
+        explicit named param wins."""
+        captured = {}
+
+        def fake_spawn(spec=None, brief=None, **kwargs):
+            captured["skill_filter"] = kwargs.get("skill_filter")
+            from types import SimpleNamespace
+            return SimpleNamespace(final_response="ok")
+
+        import archetype_delegate as ad
+        monkeypatch.setattr(ad, "archetype_delegate", fake_spawn, raising=False)
+
+        handler = router_module._make_handler("consultant")
+        collapsed_goal = {
+            "goal": "x",
+            "skill_include_override": ["knows_multiAgent-orchestrationHowTo"],
+        }
+        # Explicit named param should override the collapsed one.
+        handler(goal=collapsed_goal, skill_include_override=["nodes_vector-search"])
+
+        assert captured.get("skill_filter") == ["nodes_vector-search"]

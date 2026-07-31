@@ -1051,6 +1051,43 @@ def _make_handler(archetype_name: str):
 
         Returns str for single-task mode, list for batch (tasks=[...]) mode.
         """
+        # v0.4.5: Defensive unwrap. Some tool-call bridges collapse the entire
+        # arguments object into the first positional param (`goal`). When that
+        # happens, `goal` arrives as a dict like
+        #   {"goal": "...", "skill_include_override": [...], ...}
+        # and the named params (skill_include_override, etc.) come through as
+        # None. Left unhandled, the resolver silently falls back to the full
+        # catalog and skill isolation is defeated. Detect and recover the
+        # structured fields from the collapsed dict so orchestrator overrides
+        # are honored regardless of how the call was serialized.
+        if isinstance(goal, dict):
+            collapsed = goal
+            goal = collapsed.get("goal", "")
+            context = context if context is not None else collapsed.get("context")
+            if tasks is None and collapsed.get("tasks") is not None:
+                tasks = collapsed.get("tasks")
+            if max_iterations is None and collapsed.get("max_iterations") is not None:
+                max_iterations = collapsed.get("max_iterations")
+            if role is None and collapsed.get("role") is not None:
+                role = collapsed.get("role")
+            if background is None and collapsed.get("background") is not None:
+                background = collapsed.get("background")
+            if output_schema_override is None and collapsed.get("output_schema_override") is not None:
+                output_schema_override = collapsed.get("output_schema_override")
+            if skill_include_override is None and collapsed.get("skill_include_override") is not None:
+                skill_include_override = collapsed.get("skill_include_override")
+            if skill_exclude_override is None and collapsed.get("skill_exclude_override") is not None:
+                skill_exclude_override = collapsed.get("skill_exclude_override")
+            if model_override is None and collapsed.get("model_override") is not None:
+                model_override = collapsed.get("model_override")
+            if preload_files is None and collapsed.get("preload_files") is not None:
+                preload_files = collapsed.get("preload_files")
+            logger.info(
+                "[skill_isolation] recovered collapsed-arg call: goal=%r skill_include_override=%r",
+                (goal[:60] + "...") if isinstance(goal, str) and len(goal) > 60 else goal,
+                skill_include_override,
+            )
+
         spec = get_archetype(archetype_name)
 
         # Apply per-call model override (rare escape hatch)
