@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.0.0 (2026-07-31) — "Archetype-Aware Dashboard"
+
+**The 1.0.0 release.** Stable public API. Polished open-source project
+shape (MIT, README, CONTRIBUTING, issue/PR templates, GH releases).
+This entry is focused on the user-visible upgrade.
+
+### What's new
+- **Dashboard rewritten.** Editorial typography (serif headlines) meets
+  control-room density. Every delegation is now a self-contained card
+  with a colored archetype rail on the left edge, an eyebrow line
+  (`◆ Frontier · Consultant`, `☰ Workhorse · Long Horizon`,
+  `✦ Lateral · Creative`, `▣ Quick · Speedster/Internal`,
+  `◌ Quick · Speedster/Internet`), a serif goal headline, and a
+  monospace meta strip showing model, duration, event count, and
+  weight. Click to expand the live transcript in place.
+- **Per-archetype color swatches:**
+  consultant `#5B3422` (brand brown), long_horizon `#4A6B7C` (slate),
+  high_hallucination `#B85C38` (terracotta), speedster_internal
+  `#6B8E5A` (olive), speedster_internet `#5E7FA8` (steel). Status
+  colors (running/completed/failed) are kept distinct from archetype
+  colors so a slate-blue card with a running badge is unambiguous.
+- **Grouped by section:** Today / Yesterday / Earlier this week /
+  Older, with counts per section. Section heads in serif small caps.
+- **Live SSE for expanded cards.** Once a card is open, new events
+  stream in via `/d/<id>/stream`. Click again to collapse.
+- **Filter chips in header.** Toggle each archetype (and "native")
+  on/off client-side. The dashboard reads `meta.json` if present
+  (plugin) and falls back gracefully to "native" (gray rail, no
+  archetype label) for legacy delegations without metadata.
+- **Toast errors** (5s auto-dismiss) instead of the sticky error box.
+- **Polyfill-safe JS.** No build step, no dependencies; still a
+  single Python file with an inline HTML page.
+
+### Plugin prerequisite
+- **`archetype_delegate.py` now writes a sibling `meta.json`** next
+  to `manifest.json` for every plugin dispatch. It contains
+  `archetype`, `model`, `provider`. The native `manifest.json` is
+  untouched. Without this file, the dashboard shows the delegation
+  as a native (gray rail, "Native · Delegate" eyebrow) — graceful
+  degradation rather than silent failure.
+
+### Verified
+- Unit suite: 102 passed.
+- Live: 60+ existing delegations render without errors; new
+  archetype meta (consultant / long_horizon / speedster_internet)
+  displays the correct eyebrow, color rail, and model badge.
+
 ## 0.4.5 (2026-07-31) — "Collapsed-Argument Recovery"
 
 **Fixed:**

@@ -450,6 +450,36 @@ def _build_child_agent_mimic(
         except Exception:
             _delegation_id = None
 
+    # v1.0.0: write sibling meta.json with archetype-specific fields
+    # (archetype, model, provider) so the dashboard can color-code rows
+    # per archetype without parsing goal text. The native manifest.json
+    # stays untouched.
+    if _delegation_id:
+        try:
+            meta_path = (
+                _hermes_home()
+                / "cache"
+                / "delegation"
+                / "live"
+                / _delegation_id
+                / "meta.json"
+            )
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "delegation_id": _delegation_id,
+                        "archetype": spec.name,
+                        "model": creds.get("model"),
+                        "provider": creds.get("provider"),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Could not write meta.json for %s: %s", _delegation_id, exc)
+
     # v0.4.0: Auto-open the Subagent Dashboard on the first plugin dispatch
     # in this process. Idempotent — module-level flag makes subsequent
     # dispatches no-ops. The dashboard polls

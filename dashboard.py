@@ -1,19 +1,22 @@
 """Hermes Subagent Dashboard — stdlib-only web preview pane for live delegations.
 
-Reads `~/.hermes/cache/delegation/live/*/manifest.json` + `task-*.log` files
-and renders them in a single-page web app. Works for native `delegate_task`
-and any plugin-constructed child (e.g. archetype-router) — both write to
-the same on-disk format.
+v1.0.0 — Archetype-aware visual language. Editorial typography meets
+control-room density. Each delegation gets a card with archetype color
+rail, eyebrow + serif goal headline, model/duration/skills meta strip,
+and a live event stream when expanded. Per-archetype swatches:
+  consultant #5B3422  long_horizon #4A6B7C  high_hallucination #B85C38
+  speedster_internal #6B8E5A  speedster_internet #5E7FA8
+
+Reads `~/.hermes/cache/delegation/live/*/manifest.json` + `meta.json`
++ `task-*.log` files. Plugin-supplied delegations include a sibling
+meta.json with archetype/model/provider; native delegations fall back
+to graceful defaults (no archetype = neutral, no model = hidden).
 
 Run:
     python dashboard.py             # serves on http://127.0.0.1:8765
     python dashboard.py --port 9000 # custom port
 
 Dependencies: zero. Python 3.9+ stdlib only.
-
-v0.3.2 — bundled with the archetype-router plugin, but works for any
-subagent that writes to `~/.hermes/cache/delegation/live/`. See
-DASHBOARD_PLAN.md for the design rationale.
 """
 from __future__ import annotations
 
@@ -27,10 +30,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-# ─── Config ──────────────────────────────────────────────────────────────
+# ─── Config ─────────────────────────────────────────────────────────────
 
-# Profile-aware HERMES_HOME: same logic as archetype_delegate.py
-# (kept inlined here so the dashboard module loads without the plugin).
 def _resolve_dashboard_home() -> Path:
     env_home = os.environ.get("HERMES_HOME", "").strip()
     if env_home:
@@ -50,9 +51,8 @@ HERMES_HOME = _resolve_dashboard_home()
 LIVE_DIR = HERMES_HOME / "cache" / "delegation" / "live"
 DEFAULT_PORT = 8765
 SSE_POLL_INTERVAL_SECS = 1.0
-ACCENT_HEX = "#5B3422"
 
-# ─── Data model ──────────────────────────────────────────────────────────
+# ─── Data model ─────────────────────────────────────────────────────────
 
 @dataclass
 class LogEvent:
@@ -91,7 +91,10 @@ class Delegation:
     completed_at: Optional[str]
     status: str
     exit_reason: Optional[str]
-    dir_path: Path
+    archetype: Optional[str] = None
+    model: Optional[str] = None
+    provider: Optional[str] = None
+    dir_path: Path = field(default_factory=lambda: Path("."))
     tasks: List[Task] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -102,13 +105,15 @@ class Delegation:
             "task_count": self.task_count,
             "status": self.status,
             "exit_reason": self.exit_reason,
+            "archetype": self.archetype,
+            "model": self.model,
+            "provider": self.provider,
             "tasks": [t.to_dict() for t in self.tasks],
         }
 
 
-# ─── Log parser ──────────────────────────────────────────────────────────
+# ─── Log parser ─────────────────────────────────────────────────────────
 
-# Log line format: "HH:MM:SS <kind>    | <payload>"
 LOG_LINE_RE = re.compile(
     r"^(?P<ts>\d{2}:\d{2}:\d{2})\s+(?P<kind>[a-zA-Z_]+)\s*\|\s*(?P<text>.*)$"
 )
@@ -126,13 +131,6 @@ def parse_log_line(line: str) -> Optional[LogEvent]:
 
 
 def read_new_events(task: Task) -> int:
-    """Append any new log lines to task.events. Returns count added.
-
-    Tracks read position in task.log_offset so re-reading is cheap.
-    Handles multi-line continuation: if a line doesn't start with a
-    timestamp header, append it to the preceding event's text instead of
-    discarding it.
-    """
     if not task.log_path.is_file():
         return 0
     try:
@@ -153,10 +151,21 @@ def read_new_events(task: Task) -> int:
             task.events.append(ev)
             added += 1
         elif task.events:
-            # Multi-line continuation of preceding event
             task.events[-1].text += "\n" + raw
-            # Counted as 0 new events (just an extension of the last one)
     return added
+
+
+def _overall_status(tasks: List[Task]) -> str:
+    if not tasks:
+        return "unknown"
+    statuses = {t.status for t in tasks}
+    if "running" in statuses:
+        return "running"
+    if "failed" in statuses:
+        return "failed"
+    if statuses == {"completed"}:
+        return "completed"
+    return "mixed"
 
 
 def load_manifest(d: Path) -> Optional[Delegation]:
@@ -177,6 +186,17 @@ def load_manifest(d: Path) -> Optional[Delegation]:
                 status=str(t.get("status", "unknown")),
             )
         )
+    # Plugin-supplied meta.json (v1.0.0+)
+    archetype = model = provider = None
+    meta_path = d / "meta.json"
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            archetype = meta.get("archetype")
+            model = meta.get("model")
+            provider = meta.get("provider")
+        except (OSError, json.JSONDecodeError):
+            pass
     return Delegation(
         id=data.get("delegation_id", d.name),
         started_at=data.get("started", ""),
@@ -184,22 +204,12 @@ def load_manifest(d: Path) -> Optional[Delegation]:
         completed_at=data.get("completed"),
         status=_overall_status(tasks),
         exit_reason=data.get("exit_reason"),
+        archetype=archetype,
+        model=model,
+        provider=provider,
         dir_path=d,
         tasks=tasks,
     )
-
-
-def _overall_status(tasks: List[Task]) -> str:
-    if not tasks:
-        return "unknown"
-    statuses = {t.status for t in tasks}
-    if "running" in statuses:
-        return "running"
-    if "failed" in statuses:
-        return "failed"
-    if statuses == {"completed"}:
-        return "completed"
-    return "mixed"
 
 
 def refresh_delegation(deleg: Delegation) -> Delegation:
@@ -216,6 +226,9 @@ def refresh_delegation(deleg: Delegation) -> Delegation:
         deleg.status = fresh.status
         deleg.completed_at = fresh.completed_at
         deleg.exit_reason = fresh.exit_reason
+        deleg.archetype = fresh.archetype
+        deleg.model = fresh.model
+        deleg.provider = fresh.provider
     else:
         for t in deleg.tasks:
             read_new_events(t)
@@ -236,12 +249,9 @@ def scan_live_dir() -> List[Delegation]:
     return delegs
 
 
-# ─── HTTP server ─────────────────────────────────────────────────────────
+# ─── HTML page (v1.0.0 — archetype-aware) ───────────────────────────────
 
-# Single HTML page. Inline CSS + JS. Designed to fail loudly: if any JS
-# errors out, the error is shown on the page itself instead of silently
-# leaving "Loading..." on screen.
-HTML_PAGE = """<!DOCTYPE html>
+HTML_PAGE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -249,210 +259,410 @@ HTML_PAGE = """<!DOCTYPE html>
 <title>Hermes Subagent Dashboard</title>
 <style>
   :root {
-    --bg: #0e0d0c;
-    --bg-elev: #1a1816;
-    --bg-elev2: #242120;
-    --fg: #e8e3dc;
-    --fg-dim: #8a847b;
-    --accent: """ + ACCENT_HEX + """;
-    --ok: #6b8e5a;
-    --warn: #c9a047;
-    --err: #c05050;
-    --border: #2e2a27;
+    --bg: #0E0D0C;
+    --bg-elev: #161412;
+    --bg-card: #1B1815;
+    --bg-card-active: #221E1B;
+    --fg: #E8E3DC;
+    --fg-mid: #B5AFA5;
+    --fg-dim: #8A847B;
+    --fg-mute: #5C5750;
+    --accent: #5B3422;
+    --accent-2: #6D4530;
+    --accent-glow: rgba(91, 52, 34, 0.18);
+    --border: #2A2624;
+    --border-soft: #1F1C1A;
+    --border-strong: #3D352E;
+
+    /* archetype swatches */
+    --c-consultant: #5B3422;
+    --c-longhorizon: #4A6B7C;
+    --c-creative: #B85C38;
+    --c-speed-internal: #6B8E5A;
+    --c-speed-internet: #5E7FA8;
+
+    /* status (kept distinct from archetype colors) */
+    --ok: #6B8E5A;
+    --warn: #C9A047;
+    --err: #C05050;
+
+    --font-display: ui-serif, "New York", "Charter", "Iowan Old Style", Georgia, serif;
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   }
+
   * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; height: 100%; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--fg); }
   body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    font-family: var(--font-ui);
     font-size: 13px;
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
+
+  /* ── Header ─────────────────────────────────────── */
   header {
+    position: sticky; top: 0; z-index: 10;
     background: var(--bg-elev);
     border-bottom: 1px solid var(--border);
-    padding: 10px 16px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 16px;
   }
-  header h1 {
-    margin: 0;
-    font-size: 14px;
+  header .wordmark {
+    font-family: var(--font-display);
+    font-size: 16px;
     font-weight: 600;
-  }
-  header .dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent);
-  }
-  header .stats {
-    margin-left: auto;
-    display: flex;
-    gap: 12px;
-    color: var(--fg-dim);
-    font-size: 11px;
-  }
-  header .stats b { color: var(--fg); margin-left: 4px; }
-  .layout {
-    display: grid;
-    grid-template-columns: 340px 1fr;
-    height: calc(100vh - 42px);
-  }
-  .timeline {
-    background: var(--bg-elev);
-    border-right: 1px solid var(--border);
-    overflow-y: auto;
-  }
-  .timeline .item {
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    cursor: pointer;
-  }
-  .timeline .item:hover { background: var(--bg-elev2); }
-  .timeline .item.active {
-    background: var(--bg-elev2);
-    border-left: 3px solid var(--accent);
-    padding-left: 11px;
-  }
-  .timeline .id {
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 11px;
-    color: var(--fg-dim);
-  }
-  .timeline .goal {
+    letter-spacing: -0.01em;
     color: var(--fg);
-    margin: 4px 0;
+  }
+  header .wordmark .accent { color: var(--accent); }
+  header .stats {
+    display: flex; gap: 18px;
+    color: var(--fg-dim); font-size: 11px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.04em;
+  }
+  header .stats b {
+    color: var(--fg); font-weight: 600; margin-left: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  header .stats .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    margin-right: 5px; vertical-align: middle;
+  }
+  header .stats .dot.live {
+    background: var(--ok); animation: pulse 2.4s ease-in-out infinite;
+  }
+  header .stats .dot.warn {
+    background: var(--warn); animation: pulse 1.4s ease-in-out infinite;
+  }
+  header .stats .dot.err { background: var(--err); }
+  header .stats .dot.dim { background: var(--fg-mute); }
+
+  header .legend {
+    margin-left: auto;
+    display: flex; gap: 8px;
+  }
+  header .legend .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+    transition: all 150ms ease;
+  }
+  header .legend .chip:hover { color: var(--fg); border-color: var(--border-strong); }
+  header .legend .chip.on { color: var(--fg); border-color: var(--border-strong); }
+  header .legend .chip .glyph { font-family: var(--font-mono); font-size: 12px; }
+  header .legend .chip[data-arch="consultant"] .glyph { color: var(--c-consultant); }
+  header .legend .chip[data-arch="long_horizon"] .glyph { color: var(--c-longhorizon); }
+  header .legend .chip[data-arch="high_hallucination"] .glyph { color: var(--c-creative); }
+  header .legend .chip[data-arch="speedster_internal"] .glyph { color: var(--c-speed-internal); }
+  header .legend .chip[data-arch="speedster_internet"] .glyph { color: var(--c-speed-internet); }
+  header .legend .chip[data-arch="__native__"] .glyph { color: var(--fg-dim); }
+
+  /* ── Column ─────────────────────────────────────── */
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }
+  .section-head {
+    display: flex; align-items: baseline; gap: 12px;
+    margin: 40px 0 14px;
+  }
+  .section-head:first-child { margin-top: 8px; }
+  .section-head h2 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 17px; font-weight: 600;
+    letter-spacing: -0.005em;
+    color: var(--fg-mid);
+  }
+  .section-head .rule {
+    flex: 1; height: 1px;
+    background: var(--border-soft);
+  }
+  .section-head .count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--fg-dim);
+    letter-spacing: 0.06em;
+  }
+
+  /* ── Delegation card ───────────────────────────── */
+  .card {
+    position: relative;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px 16px 22px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+    overflow: hidden;
+  }
+  .card:hover {
+    background: var(--bg-card-active);
+    border-color: var(--border-strong);
+  }
+  .card.active {
+    border-color: var(--accent-2);
+    background: var(--bg-card-active);
+  }
+  /* archetype rail — left edge */
+  .card::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 4px;
+    background: var(--rail-color, var(--fg-mute));
+    border-top-left-radius: 12px;
+    border-bottom-left-radius: 12px;
+  }
+  .card.active::before { width: 6px; }
+  .card[data-arch="consultant"] { --rail-color: var(--c-consultant); }
+  .card[data-arch="long_horizon"] { --rail-color: var(--c-longhorizon); }
+  .card[data-arch="high_hallucination"] { --rail-color: var(--c-creative); }
+  .card[data-arch="speedster_internal"] { --rail-color: var(--c-speed-internal); }
+  .card[data-arch="speedster_internet"] { --rail-color: var(--c-speed-internet); }
+  .card[data-arch="__native__"] { --rail-color: var(--fg-mute); }
+
+  .eyebrow {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    margin-bottom: 6px;
+  }
+  .eyebrow .glyph { font-size: 13px; }
+  .card[data-arch="consultant"] .eyebrow .glyph { color: var(--c-consultant); }
+  .card[data-arch="long_horizon"] .eyebrow .glyph { color: var(--c-longhorizon); }
+  .card[data-arch="high_hallucination"] .eyebrow .glyph { color: var(--c-creative); }
+  .card[data-arch="speedster_internal"] .eyebrow .glyph { color: var(--c-speed-internal); }
+  .card[data-arch="speedster_internet"] .eyebrow .glyph { color: var(--c-speed-internet); }
+
+  .eyebrow .archetype {
+    color: var(--rail-color, var(--fg-mid));
+    text-transform: uppercase;
+  }
+  .eyebrow .id { color: var(--fg-mute); font-weight: 500; }
+  .eyebrow .status { margin-left: auto; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 7px;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .badge.running { background: rgba(201, 160, 71, 0.18); color: var(--warn); }
+  .badge.completed { background: rgba(107, 142, 90, 0.18); color: var(--ok); }
+  .badge.failed { background: rgba(192, 80, 80, 0.18); color: var(--err); }
+  .badge.unknown, .badge.mixed { background: rgba(138, 132, 123, 0.18); color: var(--fg-dim); }
+  .badge .dot {
+    display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    background: currentColor;
+  }
+  .badge.running .dot { animation: pulse 1.4s ease-in-out infinite; }
+
+  .goal {
+    font-family: var(--font-display);
+    font-size: 17px;
+    line-height: 1.35;
+    color: var(--fg);
+    letter-spacing: -0.005em;
+    margin: 4px 0 10px;
     overflow: hidden;
     text-overflow: ellipsis;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
   }
-  .timeline .meta {
-    display: flex;
-    gap: 8px;
-    align-items: center;
+  .card.active .goal {
+    -webkit-line-clamp: unset;
+    display: block;
+  }
+
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 14px;
+    font-family: var(--font-mono);
     font-size: 11px;
     color: var(--fg-dim);
+    letter-spacing: 0.02em;
   }
-  .badge {
-    display: inline-block;
-    padding: 1px 6px;
-    border-radius: 3px;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
+  .meta .k { color: var(--fg-mute); margin-right: 4px; }
+  .meta .v { color: var(--fg-mid); font-variant-numeric: tabular-nums; }
+
+  /* ── Inline transcript (expanded card) ─────────── */
+  .transcript {
+    display: none;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-soft);
+  }
+  .card.active .transcript { display: block; }
+  .transcript .row {
+    display: grid;
+    grid-template-columns: 68px 80px 1fr;
+    gap: 10px;
+    padding: 3px 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.55;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .transcript .row:last-child { border-bottom: none; }
+  .transcript .ts { color: var(--fg-mute); font-variant-numeric: tabular-nums; }
+  .transcript .kind {
+    color: var(--fg-mid);
     font-weight: 600;
+    text-transform: lowercase;
   }
-  .badge.running { background: var(--warn); color: #1a1816; }
-  .badge.completed { background: var(--ok); color: #1a1816; }
-  .badge.failed { background: var(--err); color: #1a1816; }
-  .badge.unknown { background: var(--fg-dim); color: #1a1816; }
-  .detail {
-    overflow-y: auto;
-    padding: 16px 20px;
-  }
-  .detail .empty {
-    color: var(--fg-dim);
-    text-align: center;
-    padding: 60px 20px;
-    font-style: italic;
-  }
-  .detail .error {
-    color: var(--err);
-    background: rgba(192, 80, 80, 0.1);
-    border: 1px solid var(--err);
-    border-radius: 4px;
-    padding: 12px 14px;
-    margin: 12px 0;
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 12px;
-    white-space: pre-wrap;
-  }
-  .detail .header {
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 12px;
-    margin-bottom: 16px;
-  }
-  .detail .goal {
-    font-size: 15px;
-    margin: 0 0 8px 0;
-    line-height: 1.4;
-  }
-  .detail .meta-row {
-    display: flex;
-    gap: 16px;
-    font-size: 11px;
-    color: var(--fg-dim);
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    flex-wrap: wrap;
-  }
-  .events {
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 12px;
-  }
-  .event {
-    padding: 4px 0;
-    border-bottom: 1px solid var(--border);
+  .transcript .kind.start, .transcript .kind.user { color: var(--accent-2); }
+  .transcript .kind.think, .transcript .kind.assistant, .transcript .kind.final { color: var(--fg-mid); }
+  .transcript .kind.tool, .transcript .kind.tool_call { color: var(--c-speed-internal); }
+  .transcript .kind.result { color: var(--c-longhorizon); }
+  .transcript .kind.error { color: var(--err); }
+  .transcript .kind.meta { color: var(--c-speed-internet); }
+  .transcript .text {
+    color: var(--fg);
     white-space: pre-wrap;
     word-break: break-word;
+    overflow-x: auto;
   }
-  .event:last-child { border-bottom: none; }
-  .event .ts { color: var(--fg-dim); margin-right: 8px; }
-  .event .kind {
-    display: inline-block;
-    width: 80px;
-    font-weight: 600;
-    color: var(--accent);
+  .transcript .empty {
+    color: var(--fg-dim);
+    font-style: italic;
+    padding: 16px 0;
+    font-family: var(--font-ui);
+    font-size: 12px;
+  }
+
+  /* ── Empty state ───────────────────────────────── */
+  .empty-state {
+    text-align: center;
+    padding: 80px 24px;
+    color: var(--fg-dim);
+  }
+  .empty-state .head {
+    font-family: var(--font-display);
+    font-size: 18px;
+    font-style: italic;
+    color: var(--fg-mid);
+    margin-bottom: 6px;
+  }
+  .empty-state .sub {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--fg-mute);
+  }
+
+  /* ── Error toast (bottom-right, dismissible) ───── */
+  #err-toast {
+    position: fixed; bottom: 16px; right: 16px; z-index: 50;
+    background: var(--bg-card);
+    border: 1px solid var(--err);
+    border-radius: 6px;
+    padding: 10px 14px;
+    color: var(--err);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    max-width: 380px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    display: none;
+  }
+  #err-toast.show { display: block; }
+  #err-toast .x {
+    float: right; cursor: pointer; color: var(--fg-dim);
+    margin-left: 12px;
+  }
+
+  /* ── Animations ────────────────────────────────── */
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 </style>
 </head>
 <body>
 <header>
-  <span class="dot"></span>
-  <h1>Hermes Subagent Dashboard</h1>
+  <div class="wordmark"><span class="accent">◆</span>&nbsp;Hermes Subagents</div>
   <div class="stats">
-    <span>Total: <b id="stat-total">0</b></span>
-    <span>Running: <b id="stat-running">0</b></span>
-    <span>Completed: <b id="stat-completed">0</b></span>
-    <span>Failed: <b id="stat-failed">0</b></span>
+    <span><span class="dot dim"></span><span>Total</span> <b id="stat-total">0</b></span>
+    <span><span class="dot warn"></span><span>Running</span> <b id="stat-running">0</b></span>
+    <span><span class="dot live"></span><span>Done</span> <b id="stat-completed">0</b></span>
+    <span><span class="dot err"></span><span>Failed</span> <b id="stat-failed">0</b></span>
   </div>
-  <span style="color: var(--fg-dim); margin-left: 16px;" id="clock"></span>
+  <div class="legend" id="legend">
+    <span class="chip on" data-arch="consultant"><span class="glyph">◆</span><span>consultant</span></span>
+    <span class="chip on" data-arch="long_horizon"><span class="glyph">☰</span><span>long_horizon</span></span>
+    <span class="chip on" data-arch="high_hallucination"><span class="glyph">✦</span><span>creative</span></span>
+    <span class="chip on" data-arch="speedster_internal"><span class="glyph">▣</span><span>speedster/int</span></span>
+    <span class="chip on" data-arch="speedster_internet"><span class="glyph">◌</span><span>speedster/net</span></span>
+    <span class="chip on" data-arch="__native__"><span class="glyph">◇</span><span>native</span></span>
+  </div>
 </header>
-<div class="layout">
-  <div class="timeline" id="timeline">
-    <div class="item" style="color: var(--fg-dim); font-style: italic;">Loading...</div>
+<main id="main">
+  <div class="empty-state">
+    <div class="head">No delegations yet</div>
+    <div class="sub">Waiting for the next dispatch from the orchestrator</div>
   </div>
-  <div class="detail" id="detail">
-    <div class="empty">Select a delegation from the timeline to view live logs</div>
-  </div>
-</div>
+</main>
+<div id="err-toast"><span class="x" onclick="document.getElementById('err-toast').classList.remove('show')">✕</span><span id="err-toast-text"></span></div>
+
 <script>
 (function() {
-  // === ERROR VISIBILITY ===
-  // Show any JS error on the page itself, so the user is never stuck on
-  // "Loading..." with no clue what broke.
+  // ── Error visibility (toast, not sticky) ─────────
   function showError(msg) {
-    var d = document.getElementById('detail');
-    if (!d) return;
-    var box = document.createElement('div');
-    box.className = 'error';
-    box.textContent = '[JS ERROR] ' + msg;
-    d.appendChild(box);
+    var t = document.getElementById('err-toast');
+    document.getElementById('err-toast-text').textContent = msg;
+    t.classList.add('show');
+    setTimeout(function() { t.classList.remove('show'); }, 5000);
     console.error(msg);
   }
   window.addEventListener('error', function(e) {
-    showError(e.message + '\\n  at ' + e.filename + ':' + e.lineno + ':' + e.colno);
+    showError(e.message + ' @ ' + e.filename + ':' + e.lineno);
   });
   window.addEventListener('unhandledrejection', function(e) {
-    showError('Unhandled promise rejection: ' + (e.reason && e.reason.message || e.reason));
+    showError('Promise: ' + (e.reason && e.reason.message || e.reason));
   });
 
-  // === STATE ===
+  // ── Constants ───────────────────────────────────
+  var ARCH_GLYPH = {
+    consultant: '◆',
+    long_horizon: '☰',
+    high_hallucination: '✦',
+    speedster_internal: '▣',
+    speedster_internet: '◌',
+    __native__: '◇'
+  };
+  var ARCH_LABEL = {
+    consultant: 'Frontier · Consultant',
+    long_horizon: 'Workhorse · Long Horizon',
+    high_hallucination: 'Lateral · Creative',
+    speedster_internal: 'Quick · Speedster/Internal',
+    speedster_internet: 'Quick · Speedster/Internet',
+    __native__: 'Native · Delegate'
+  };
+
+  // ── State ───────────────────────────────────────
   var state = {
     delegs: [],
     selectedId: null,
+    filter: { consultant: true, long_horizon: true, high_hallucination: true, speedster_internal: true, speedster_internet: true, __native__: true },
     eventSource: null,
   };
 
@@ -462,134 +672,233 @@ HTML_PAGE = """<!DOCTYPE html>
     });
   }
 
+  function fmtDuration(d) {
+    if (!d || d < 0) return '—';
+    if (d < 60) return d.toFixed(1) + 's';
+    var m = Math.floor(d / 60), s = Math.floor(d % 60);
+    if (m < 60) return m + 'm ' + s + 's';
+    var h = Math.floor(m / 60), mm = m % 60;
+    return h + 'h ' + mm + 'm';
+  }
+  function durationFor(d) {
+    if (!d.started_at) return null;
+    var start = new Date(d.started_at.replace(' ', 'T')).getTime();
+    if (isNaN(start)) return null;
+    var end = d.completed_at ? new Date(d.completed_at.replace(' ', 'T')).getTime() : Date.now();
+    return (end - start) / 1000;
+  }
+  function eventCount(d) {
+    var n = 0;
+    (d.tasks || []).forEach(function(t) { n += (t.events || []).length; });
+    return n;
+  }
+  function taskCount(d) {
+    return (d.tasks && d.tasks.length) || d.task_count || 1;
+  }
+  function weightOf(d) {
+    var n = eventCount(d);
+    var dur = durationFor(d) || 0;
+    if (n > 80 || dur > 600) return 'heavy';
+    if (n > 20) return 'medium';
+    return 'light';
+  }
+  function archKey(d) {
+    var a = d.archetype;
+    if (a && ARCH_GLYPH[a]) return a;
+    return '__native__';
+  }
+  function shortId(id) {
+    if (!id) return '—';
+    var m = /deleg_([0-9a-f]+)/.exec(id);
+    return m ? m[1].slice(0, 6) : id.slice(0, 8);
+  }
+  function shortGoal(g) {
+    if (!g) return '(no goal)';
+    return g.length > 220 ? g.slice(0, 217) + '…' : g;
+  }
+  function sectionLabel(started) {
+    if (!started) return 'Earlier';
+    var t = new Date(started.replace(' ', 'T'));
+    if (isNaN(t.getTime())) return 'Earlier';
+    var now = new Date();
+    var diffMs = now - t;
+    var sameDay = t.toDateString() === now.toDateString();
+    var yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+    var sameYest = t.toDateString() === yesterday.toDateString();
+    if (sameDay) return 'Today';
+    if (sameYest) return 'Yesterday';
+    if (diffMs < 7 * 86400e3) return 'Earlier this week';
+    return 'Older';
+  }
+
+  // ── Render ──────────────────────────────────────
   function statusBadge(s) {
-    var known = ['running','completed','failed'];
+    var known = ['running','completed','failed','mixed','unknown'];
     var cls = known.indexOf(s) >= 0 ? s : 'unknown';
-    return '<span class="badge ' + cls + '">' + esc(s) + '</span>';
+    return '<span class="badge ' + cls + '"><span class="dot"></span>' + esc(s) + '</span>';
   }
 
-  function updateStats(delegs) {
-    document.getElementById('stat-total').textContent = delegs.length;
-    document.getElementById('stat-running').textContent =
-      delegs.filter(function(d) { return d.status === 'running'; }).length;
-    document.getElementById('stat-completed').textContent =
-      delegs.filter(function(d) { return d.status === 'completed'; }).length;
-    document.getElementById('stat-failed').textContent =
-      delegs.filter(function(d) { return d.status === 'failed'; }).length;
-  }
-
-  function renderTimeline() {
-    var tl = document.getElementById('timeline');
-    if (state.delegs.length === 0) {
-      tl.innerHTML = '<div class="item" style="color: var(--fg-dim); font-style: italic;">No delegations yet</div>';
+  function renderMain() {
+    var main = document.getElementById('main');
+    var filtered = state.delegs.filter(function(d) { return state.filter[archKey(d)]; });
+    if (filtered.length === 0) {
+      main.innerHTML = '<div class="empty-state"><div class="head">No delegations match</div><div class="sub">Toggle a chip in the header to widen the filter</div></div>';
       return;
     }
+    // group by section label
+    var groups = {};
+    var order = [];
+    filtered.forEach(function(d) {
+      var k = sectionLabel(d.started_at);
+      if (!groups[k]) { groups[k] = []; order.push(k); }
+      groups[k].push(d);
+    });
     var html = '';
-    for (var i = 0; i < state.delegs.length; i++) {
-      var d = state.delegs[i];
-      var goal = (d.tasks && d.tasks[0]) ? d.tasks[0].goal : '(no task)';
-      var isActive = d.id === state.selectedId;
-      html += '<div class="item' + (isActive ? ' active' : '') + '" data-id="' + esc(d.id) + '">';
-      html += '<div class="id">' + esc(d.id) + '</div>';
-      html += '<div class="goal">' + esc(goal) + '</div>';
-      html += '<div class="meta">' + statusBadge(d.status);
-      html += '<span>' + esc(d.started_at || '') + '</span>';
-      html += '</div></div>';
-    }
-    tl.innerHTML = html;
-    var items = tl.querySelectorAll('.item');
-    for (var j = 0; j < items.length; j++) {
-      items[j].addEventListener('click', function(el) {
-        return function() { selectDeleg(el.getAttribute('data-id')); };
-      }(items[j]));
-    }
+    order.forEach(function(k) {
+      html += '<div class="section-head"><h2>' + esc(k) + '</h2><span class="rule"></span><span class="count">' + groups[k].length + '</span></div>';
+      groups[k].forEach(function(d) { html += renderCard(d); });
+    });
+    main.innerHTML = html;
+    // wire click handlers
+    Array.prototype.forEach.call(main.querySelectorAll('.card'), function(el) {
+      el.addEventListener('click', function(e) {
+        if (e.target.closest('a')) return;
+        selectDeleg(el.getAttribute('data-id'));
+      });
+    });
+    updateStats();
   }
 
-  function renderDetail(d) {
-    var detail = document.getElementById('detail');
-    if (!d) {
-      detail.innerHTML = '<div class="empty">No delegation selected</div>';
-      return;
-    }
-    if (d.error) {
-      detail.innerHTML = '<div class="empty">' + esc(d.error) + '</div>';
-      return;
-    }
-    var task = (d.tasks && d.tasks[0]) ? d.tasks[0] : null;
-    var goal = task ? task.goal : '(no task)';
-    var evs = task ? task.events : [];
-    var evHtml = '';
-    for (var i = 0; i < evs.length; i++) {
-      var e = evs[i];
-      evHtml += '<div class="event">';
-      evHtml += '<span class="ts">' + esc(e.timestamp || '??:??:??') + '</span>';
-      evHtml += '<span class="kind">' + esc(e.kind) + '</span>';
-      evHtml += '<span>' + esc(e.text) + '</span>';
-      evHtml += '</div>';
-    }
-    var meta = '<span>id: ' + esc(d.id) + '</span>';
-    meta += statusBadge(d.status);
-    meta += '<span>started: ' + esc(d.started_at || '?') + '</span>';
-    if (d.completed_at) meta += '<span>completed: ' + esc(d.completed_at) + '</span>';
-    if (d.exit_reason) meta += '<span>exit: ' + esc(d.exit_reason) + '</span>';
-    detail.innerHTML =
-      '<div class="header"><div class="goal">' + esc(goal) + '</div>' +
-      '<div class="meta-row">' + meta + '</div></div>' +
-      '<div class="events">' + (evHtml || '<div class="empty" style="padding: 30px;">No events yet...</div>') + '</div>';
-    detail.scrollTop = detail.scrollHeight;
+  function renderCard(d) {
+    var ak = archKey(d);
+    var glyph = ARCH_GLYPH[ak] || '◇';
+    var label = ARCH_LABEL[ak] || 'Native';
+    var isActive = d.id === state.selectedId;
+    var dur = fmtDuration(durationFor(d));
+    var evc = eventCount(d);
+    var tc = taskCount(d);
+    var w = weightOf(d);
+    var model = d.model || '—';
+    var id = shortId(d.id);
+    var html = '';
+    html += '<div class="card ' + (isActive ? 'active' : '') + '" data-id="' + esc(d.id) + '" data-arch="' + esc(ak) + '">';
+    html +=   '<div class="eyebrow">';
+    html +=     '<span class="glyph">' + glyph + '</span>';
+    html +=     '<span class="archetype">' + esc(label) + '</span>';
+    html +=     '<span class="id">· ' + esc(id) + '</span>';
+    html +=     '<span class="status">' + statusBadge(d.status) + '</span>';
+    html +=   '</div>';
+    html +=   '<div class="goal">' + esc(shortGoal((d.tasks && d.tasks[0]) ? d.tasks[0].goal : '')) + '</div>';
+    html +=   '<div class="meta">';
+    html +=     '<span><span class="k">model</span><span class="v">' + esc(model) + '</span></span>';
+    html +=     '<span><span class="k">dur</span><span class="v">' + esc(dur) + '</span></span>';
+    html +=     '<span><span class="k">events</span><span class="v">' + evc + '</span></span>';
+    if (tc > 1) html += '<span><span class="k">tasks</span><span class="v">' + tc + '</span></span>';
+    html +=     '<span><span class="k">weight</span><span class="v">' + w + '</span></span>';
+    html +=   '</div>';
+    html +=   '<div class="transcript">';
+    html +=     renderTranscript(d);
+    html +=   '</div>';
+    html += '</div>';
+    return html;
   }
 
+  function renderTranscript(d) {
+    if (!d.tasks || d.tasks.length === 0) return '<div class="empty">No transcript yet…</div>';
+    var html = '';
+    d.tasks.forEach(function(t) {
+      if (d.tasks.length > 1) {
+        html += '<div class="row" style="grid-template-columns: 1fr;"><div class="ts" style="color:var(--accent-2); font-weight:600;">── task ' + t.index + ' ──</div></div>';
+      }
+      var evs = t.events || [];
+      if (evs.length === 0) {
+        html += '<div class="empty">No events yet…</div>';
+      } else {
+        evs.forEach(function(e) {
+          html += '<div class="row">';
+          html +=   '<span class="ts">' + esc(e.timestamp || '??:??:??') + '</span>';
+          html +=   '<span class="kind">' + esc(e.kind) + '</span>';
+          html +=   '<span class="text">' + esc(e.text) + '</span>';
+          html += '</div>';
+        });
+      }
+    });
+    return html;
+  }
+
+  function updateStats() {
+    var all = state.delegs;
+    document.getElementById('stat-total').textContent = all.length;
+    document.getElementById('stat-running').textContent = all.filter(function(d){return d.status==='running';}).length;
+    document.getElementById('stat-completed').textContent = all.filter(function(d){return d.status==='completed';}).length;
+    document.getElementById('stat-failed').textContent = all.filter(function(d){return d.status==='failed';}).length;
+  }
+
+  // ── Selection / streaming ───────────────────────
   function selectDeleg(id) {
-    if (id === state.selectedId) return;
+    if (id === state.selectedId) {
+      // toggle off
+      state.selectedId = null;
+      if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
+      renderMain();
+      return;
+    }
     state.selectedId = id;
-    renderTimeline();
     if (state.eventSource) { state.eventSource.close(); state.eventSource = null; }
-    var detail = document.getElementById('detail');
-    detail.innerHTML = '<div class="empty">Loading delegation...</div>';
+    renderMain();
+    // scroll the selected card into view
+    var el = document.querySelector('.card[data-id="' + cssEscape(id) + '"]');
+    if (el) el.scrollIntoView({block:'start', behavior:'smooth'});
     state.eventSource = new EventSource('/d/' + encodeURIComponent(id) + '/stream');
     state.eventSource.onmessage = function(ev) {
       try {
         var deleg = JSON.parse(ev.data);
-        renderDetail(deleg);
-      } catch (e) {
-        showError('Failed to parse SSE data: ' + e.message);
-      }
+        var i = state.delegs.findIndex(function(x){return x.id === deleg.id;});
+        if (i >= 0) state.delegs[i] = deleg; else state.delegs.unshift(deleg);
+        renderMain();
+      } catch (e) { showError('SSE parse: ' + e.message); }
     };
-    state.eventSource.onerror = function() {
-      // Browser will auto-reconnect. Don't spam errors.
-    };
+    state.eventSource.onerror = function() { /* browser auto-reconnects */ };
   }
 
-  function refreshTimeline() {
+  function cssEscape(s) {
+    if (window.CSS && CSS.escape) return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, function(c){return '\\' + c;});
+  }
+
+  // ── Filter chips ────────────────────────────────
+  Array.prototype.forEach.call(document.querySelectorAll('#legend .chip'), function(chip) {
+    chip.addEventListener('click', function() {
+      var k = chip.getAttribute('data-arch');
+      state.filter[k] = !state.filter[k];
+      chip.classList.toggle('on', state.filter[k]);
+      renderMain();
+    });
+  });
+
+  // ── Polling ─────────────────────────────────────
+  function refresh() {
     fetch('/api/delegations')
       .then(function(r) { return r.json(); })
       .then(function(delegs) {
+        // Preserve selected task event offsets by deep-merging events from the selected SSE
         state.delegs = delegs;
-        updateStats(delegs);
-        renderTimeline();
+        renderMain();
       })
-      .catch(function(e) {
-        showError('Failed to load /api/delegations: ' + e.message);
-      });
+      .catch(function(e) { showError('list fetch: ' + e.message); });
   }
-
-  function updateClock() {
-    var el = document.getElementById('clock');
-    if (el) el.textContent = new Date().toLocaleTimeString();
-  }
-  setInterval(updateClock, 1000);
-  updateClock();
-  setInterval(refreshTimeline, 2000);
-  refreshTimeline();
+  refresh();
+  setInterval(refresh, 3000);
 })();
 </script>
 </body>
 </html>
 """
 
+# ─── HTTP server ───────────────────────────────────────────────────────
 
 class DashboardHandler(BaseHTTPRequestHandler):
-    server_version = "HermesSubagentDashboard/0.3.2"
+    server_version = "HermesSubagentDashboard/1.0.0"
 
     def log_message(self, format, *args):
         return  # quiet
@@ -661,12 +970,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
             while True:
                 refresh_delegation(deleg)
                 payload = deleg.to_dict()
-                # Only emit when state actually changed (saves bandwidth)
                 if payload != last_payload:
                     self._sse_write(payload)
                     last_payload = payload
-                if deleg.status in ("completed", "failed") and not deleg.tasks:
-                    break
                 if deleg.status in ("completed", "failed"):
                     fully_read = True
                     for t in deleg.tasks:
@@ -696,7 +1002,7 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
 
-# ─── Entry point ─────────────────────────────────────────────────────────
+# ─── Entry point ────────────────────────────────────────────────────────
 
 def main(argv: Optional[List[str]] = None) -> int:
     import argparse
