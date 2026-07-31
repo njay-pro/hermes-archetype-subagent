@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.3 (2026-07-31) — "True Runtime Skill Isolation"
+
+**Added:**
+- **Context-local skill isolation patches.** The computed L1/L2/L3 skill allowlist
+  is now strictly enforced at runtime. We monkeypatch `get_disabled_skill_names`
+  and `_is_skill_disabled` globally on plugin load, routing to a thread-safe
+  `ContextVar`. During subagent conversation runs, the complement of the
+  allowlist is treated as disabled — restricting both the system prompt's
+  `<available_skills>` block and the subagent's `skills_list` / `skill_view`
+  tools dynamically without database races.
+- Added 4 unit tests verifying correct proxy wrapping, context isolation, and
+  restoration.
+
+**Fixed:**
+- **Diagnostics JSON string contract (v0.4.1).** `delegate_task_diagnostics`
+  now JSON-serializes the returned dict to conform to the Hermes tool-result
+  string contract.
+- **First-dispatch dashboard race (v0.4.2).** `auto_open_dashboard()` now blocks
+  the dispatching thread (bounded by 3s max wait) until the dashboard binds the
+  port, resolving timing issues where subagents curled the port too early.
+
 ## 0.4.0 (2026-07-31) — "No More Duplicates, No More Drift"
 
 **Breaking:** none. Wire-compatible with 0.3.x.

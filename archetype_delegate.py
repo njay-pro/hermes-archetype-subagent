@@ -19,6 +19,8 @@ import uuid as _uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from skill_isolation import skill_isolation_context
+
 
 # ---------------------------------------------------------------------------
 # Profile-aware Hermes home resolution (v0.3.4)
@@ -731,6 +733,7 @@ def archetype_delegate(
     model_override: Optional[Dict[str, str]] = None,
     real_goal: str = "",
     task_index: int = 0,
+    skill_filter: Optional[List[str]] = None,
 ) -> Any:
     """Spawn a child AIAgent in-memory with archetype model & provider credentials.
 
@@ -769,9 +772,10 @@ def archetype_delegate(
 
         def _run_and_unregister() -> Any:
             try:
-                return child.run_conversation(
-                    user_message=brief, stream_callback=stream_relay
-                )
+                with skill_isolation_context(skill_filter):
+                    return child.run_conversation(
+                        user_message=brief, stream_callback=stream_relay
+                    )
             finally:
                 if subagent_id:
                     _unregister_plugin_subagent(subagent_id)
@@ -786,7 +790,8 @@ def archetype_delegate(
         return future
 
     try:
-        res = child.run_conversation(user_message=brief, stream_callback=stream_relay)
+        with skill_isolation_context(skill_filter):
+            res = child.run_conversation(user_message=brief, stream_callback=stream_relay)
     finally:
         # v0.3.2: keep the TUI's subagent tree clean after the child ends.
         if subagent_id:

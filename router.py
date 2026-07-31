@@ -1116,6 +1116,7 @@ def _make_handler(archetype_name: str):
                     background=bool(background),
                     real_goal=t_goal,
                     task_index=idx,
+                    skill_filter=skill_filter,
                 )
 
             with ThreadPoolExecutor(max_workers=max(1, max_workers)) as ex:
@@ -1136,6 +1137,7 @@ def _make_handler(archetype_name: str):
             role=role or "leaf",
             background=bool(background),
             real_goal=goal or "",
+            skill_filter=skill_filter,
         )
 
     handler.__name__ = f"_delegate_task_{archetype_name}"
@@ -1373,6 +1375,13 @@ def register(ctx) -> None:
     doesn't change this plugin tool's toolset registration — that's
     controlled by the user's enabled_toolsets config.
     """
+    # v0.4.3: Initialize context-local skill isolation patches
+    try:
+        from skill_isolation import patch_skills_isolation_system
+        patch_skills_isolation_system()
+    except Exception as exc:
+        logger.error("Failed to initialize skill isolation patches: %s", exc)
+
     for tool_name, (schema, handler) in _build_all().items():
         ctx.register_tool(
             name=tool_name,
