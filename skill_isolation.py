@@ -64,6 +64,7 @@ def patch_skills_isolation_system() -> None:
 
     def patched_get_disabled_skill_names(platform: str | None = None) -> set[str]:
         allowlist = _SKILL_ALLOWLIST.get()
+        logger.info("[skill_isolation] patched_get_disabled_skill_names: allowlist=%r", allowlist)
         if allowlist is None:
             return orig_get_disabled(platform)
         
@@ -94,7 +95,11 @@ def patch_skills_isolation_system() -> None:
         # Complement of whitelist is the disabled set
         # (We also include the original disabled ones just in case)
         disabled_complement = {s for s in all_skills if s not in allowlist}
-        return disabled_complement | orig_get_disabled(platform)
+        # assert orig_get_disabled is not None for type-checking
+        assert orig_get_disabled is not None
+        res = disabled_complement | orig_get_disabled(platform)
+        logger.info("[skill_isolation] get_disabled_skill_names returning %d disabled skills", len(res))
+        return res
 
     skill_utils.get_disabled_skill_names = patched_get_disabled_skill_names
 
@@ -108,11 +113,16 @@ def patch_skills_isolation_system() -> None:
 
     def patched_is_skill_disabled(name: str, platform: Optional[str] = None) -> bool:
         allowlist = _SKILL_ALLOWLIST.get()
+        logger.info("[skill_isolation] patched_is_skill_disabled: name=%r, allowlist=%r", name, allowlist)
         if allowlist is None:
+            # assert orig_is_disabled is not None for type-checking
+            assert orig_is_disabled is not None
             # Cast platform to str | None which is safe because Python accepts None
             return orig_is_disabled(name, platform)  # type: ignore
         # Whitelist check: if it's not in the allowlist, it is disabled
-        return name not in allowlist
+        res = name not in allowlist
+        logger.info("[skill_isolation] name %r not in allowlist %r -> disabled=%r", name, allowlist, res)
+        return res
 
     skills_tool._is_skill_disabled = patched_is_skill_disabled
 
