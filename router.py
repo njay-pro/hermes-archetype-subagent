@@ -1347,12 +1347,18 @@ def _build_diagnostics_schema() -> dict:
 
 def _make_diagnostics_handler():
     def handler(archetype=None, since="1h", **extra):
-        return _collect_diagnostics(archetype=archetype, since=since)
+        # v0.4.0: Hermes tool-result contract expects a string return.
+        # The diagnostics payload is a structured dict — JSON-encode it
+        # so the orchestrator sees a parseable result and downstream code
+        # can json.loads() it back into a dict if needed.
+        import json as _json
+        result = _collect_diagnostics(archetype=archetype, since=since)
+        return _json.dumps(result, indent=2, sort_keys=True, default=str)
     handler.__name__ = "_delegate_task_diagnostics"
     handler.__qualname__ = handler.__name__
     handler.__doc__ = (
         "v0.4.0: Diagnostics — return per-archetype stats from live "
-        "transcripts. No side effects."
+        "transcripts. No side effects. Returns JSON-encoded dict."
     )
     return handler
 
