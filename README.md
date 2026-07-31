@@ -76,6 +76,54 @@ restart. Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ---
 
+## Installation — don't do this by hand
+
+**This plugin is tightly coupled to Hermes internals.** It mimics
+`delegate_task`'s call path (`AIAgent`, live-transcript writer,
+`_active_subagents` registration, profile env propagation). A Hermes
+upgrade can silently break it.
+
+**Don't try to install it yourself.** Paste the prompt below into your
+Hermes agent and let it walk the install. The agent has the context to
+discover your profiles, your `custom_providers.0.models` registrations,
+and your gateway state — you don't.
+
+````markdown
+Install the hermes-archetype-subagent plugin from
+https://github.com/njay-pro/hermes-archetype-subagent (tag v0.4.0).
+
+Steps:
+1. Clone to ~/.hermes/plugins/archetype-router (NOT ~/Code/... —
+   plugin loader expects this path).
+2. Run `uv sync --extra dev --extra test` inside that clone.
+3. Replace ~/.hermes/plugins/archetype-router if it was a real dir
+   (some users have one) with a symlink to the clone.
+4. For each Hermes profile you have (discover them via
+   ~/.hermes/profiles/), symlink ~/.hermes/profiles/<prof>/plugins/archetype-router
+   to ~/.hermes/plugins/archetype-router.
+5. Read archetype_model_config.json. For each `arc-*` combo in
+   the archetypes block, register it in Hermes:
+     hermes config set custom_providers.0.models.<combo>.context_length 1000000 --force
+   Do this for ALL your profiles.
+6. Restart the gateway so it picks up the plugin.
+7. Verify: dispatch delegate_task_consultant with goal="echo your SOUL
+   first 50 chars" — subagent should return. If it returns
+   ModuleNotFoundError, you forgot step 2.
+8. The first dispatch in any new Hermes session auto-opens the
+   dashboard at http://127.0.0.1:8765/. No action needed.
+
+If any step fails, stop and tell me which step + the error. Do NOT
+work around silently.
+````
+
+**After install:** the agent should report what it did and the result of
+step 7. If anything looks wrong, paste the output back and we'll debug.
+
+**Compatibility:** tested against Hermes as of 2026-07. If your Hermes
+is more than a few months old or pre-release, ask before installing.
+
+---
+
 ## Install the Skills (Optional)
 
 This plugin bundles 2 skills it uses heavily. To install them to all

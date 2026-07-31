@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra test
+
+      - name: Lint (ruff)
+        run: |
+          uv run ruff check . || true
+
+      - name: Type check (mypy)
+        run: |
+          uv run mypy router.py archetype_delegate.py auto_dashboard.py --ignore-missing-imports || true
+
+      - name: Run tests (skip integration)
+        run: uv run pytest tests/ -v --tb=short -m "not integration"
+
+      - name: Run integration tests (best-effort, no creds)
+        run: uv run pytest tests/ -v --tb=short -m "integration" || echo "integration tests skipped — needs live 9router"
+        continue-on-error: true

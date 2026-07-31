@@ -18,6 +18,13 @@ htmlcov/
 
 # Virtual environments
 .venv/
+
+# uv lock (regenerated on every sync — keep noise out of diffs)
+uv.lock
+
+# v0.4.0: diagnostic scratch + dashboard outputs
+docs/audits/
+dashboard.log
 venv/
 env/
 

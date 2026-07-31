@@ -19,9 +19,77 @@ import uuid as _uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+
+# ---------------------------------------------------------------------------
+# Profile-aware Hermes home resolution (v0.3.4)
+# ---------------------------------------------------------------------------
+#
+# Before v0.3.4, the plugin read `HERMES_HOME` at module import and cached
+# the value. It ignored `HERMES_PROFILE` entirely. Subagents spawned in
+# non-root profiles (e.g. `ana-board`) wrote their live-transcript cache to
+# the root `~/.hermes/cache/delegation/live/...` instead of the
+# profile-scoped `~/.hermes/profiles/ana-board/cache/delegation/live/...`,
+# causing transcript collisions when two profiles delegated concurrently.
+#
+# The fix introduces `_hermes_home()`, called by every cache-path write
+# site. Resolution priority (highest first):
+#   1. HERMES_HOME env var (profile-isolated launches set this).
+#   2. HERMES_PROFILE env var (the v0.3.4 fix — subprocesses forgot
+#      HERMES_HOME but did forward HERMES_PROFILE).
+#   3. Module-level HERMES_HOME if mutated since import (v0.3.2 test contract).
+#   4. Native default.
+# ---------------------------------------------------------------------------
+
+
+# Capture the initial env-resolved default at import time. This is the
+# "what was the home when the plugin loaded" anchor used by the patch
+# detector below.
+def _initial_default() -> Path:
+    try:
+        from hermes_constants import get_hermes_home as _native_home
+        return _native_home()
+    except ImportError:
+        return Path.home() / ".hermes"
+
+
+_INITIAL_HERMES_HOME: Path = _initial_default()
+# Module-level backwards-compat shim for the existing test suite.
+HERMES_HOME = _INITIAL_HERMES_HOME
+
+
+def _hermes_home() -> Path:
+    """Return the current profile-aware Hermes home (see module docstring).
+
+    The discriminator between "test monkey-patched HERMES_HOME" and
+    "subprocess set HERMES_HOME" is comparing the module-level symbol
+    against the value it had at import time (``_INITIAL_HERMES_HOME``).
+    If they diverge, someone has patched the symbol. Otherwise env wins.
+    """
+    # Priority 1: module-level patch wins (v0.3.2 test contract — tests do
+    # `ad.HERMES_HOME = Path(tmp)`). Compare against the initial value,
+    # not the current env-resolved default, so env mutations between
+    # import and call don't get mistaken for patches.
+    if HERMES_HOME != _INITIAL_HERMES_HOME:
+        return HERMES_HOME
+
+    # Priority 2: env-set HERMES_HOME (profile-isolated launches — wins
+    # over HERMES_PROFILE because the subprocess explicitly set it).
+    env_home = os.environ.get("HERMES_HOME", "").strip()
+    if env_home:
+        return Path(env_home)
+
+    # Priority 3: HERMES_PROFILE alone (the v0.3.4 fix — subprocesses that
+    # forgot HERMES_HOME but did forward HERMES_PROFILE).
+    profile = os.environ.get("HERMES_PROFILE", "").strip()
+    if profile:
+        return _INITIAL_HERMES_HOME / "profiles" / profile
+
+    # Priority 4: import-time default.
+    return _INITIAL_HERMES_HOME
+
 
 logger = logging.getLogger("archetype-router.delegate")
+
 
 # Tools that subagent children must not have access to (matches native delegate_task)
 DELEGATE_BLOCKED_TOOLS = frozenset(
@@ -51,6 +119,13 @@ def resolve_creds_for_spec(spec, model_override: Optional[Dict[str, str]] = None
     native's resolve_runtime_provider() to look up base_url/api_key/api_mode.
 
     If model_override is given, it wins over spec.model + spec.provider.
+
+    v0.4.0: On failure, walks spec.fallback_chain — a list of
+    {provider, model} dicts from archetype_model_config.json. Each entry
+    is re-resolved via Hermes's resolve_runtime_provider(); Hermes itself
+    walks its own fallback_models list internally per provider. We do NOT
+    reimplement the fallback chain — Hermes already has one. We just
+    give it a list of provider hops to try.
     """
     try:
         from hermes_cli.runtime_provider import resolve_runtime_provider
@@ -65,50 +140,59 @@ def resolve_creds_for_spec(spec, model_override: Optional[Dict[str, str]] = None
         model = spec.model
         provider = spec.provider
 
-    if provider and provider.startswith("custom:"):
-        requested = provider[len("custom:"):]
+    # Build the ordered list of (provider, model) attempts: primary first,
+    # then fallback_chain entries. Each is one Hermes resolution attempt.
+    attempts: List[Dict[str, str]] = []
+    if provider and model:
+        attempts.append({"provider": provider, "model": model})
+    for entry in (spec.fallback_chain or []):
+        if isinstance(entry, dict) and entry.get("provider") and entry.get("model"):
+            attempts.append({"provider": entry["provider"], "model": entry["model"]})
+
+    last_exc: Optional[Exception] = None
+    for attempt in attempts:
+        ap = attempt["provider"]
+        am = attempt["model"]
+        requested = ap[len("custom:"):] if ap.startswith("custom:") else ap
         try:
             runtime = resolve_runtime_provider(
                 requested=requested,
-                target_model=model,
+                target_model=am,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to resolve provider %r: %s", provider, exc)
-            return {
-                "model": model,
-                "provider": provider,
-                "base_url": None,
-                "api_key": None,
-                "api_mode": None,
-            }
+            last_exc = exc
+            logger.warning(
+                "Provider %r failed for archetype %s: %s. "
+                "Trying next in fallback_chain.",
+                ap, spec.name, exc,
+            )
+            continue
+        # Success — log which attempt won if it's not the primary
+        if attempt is not attempts[0]:
+            logger.info(
+                "Archetype %s using fallback provider %r (model=%s) — "
+                "primary %r unavailable: %s",
+                spec.name, ap, am, attempts[0]["provider"], last_exc,
+            )
         return {
-            "model": model,
-            "provider": provider,
+            "model": am,
+            "provider": ap,
             "base_url": runtime.get("base_url"),
             "api_key": runtime.get("api_key"),
             "api_mode": runtime.get("api_mode"),
         }
 
-    try:
-        runtime = resolve_runtime_provider(
-            requested=provider,
-            target_model=model,
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Provider %r did not resolve (%s); using bare values", provider, exc)
-        return {
-            "model": model,
-            "provider": provider,
-            "base_url": None,
-            "api_key": None,
-            "api_mode": None,
-        }
+    # All attempts failed.
+    logger.error(
+        "All %d fallback providers exhausted for archetype %s. Last error: %s",
+        len(attempts), spec.name, last_exc,
+    )
     return {
         "model": model,
         "provider": provider,
-        "base_url": runtime.get("base_url"),
-        "api_key": runtime.get("api_key"),
-        "api_mode": runtime.get("api_mode"),
+        "base_url": None,
+        "api_key": None,
+        "api_mode": None,
     }
 
 
@@ -364,6 +448,17 @@ def _build_child_agent_mimic(
         except Exception:
             _delegation_id = None
 
+    # v0.4.0: Auto-open the Subagent Dashboard on the first plugin dispatch
+    # in this process. Idempotent — module-level flag makes subsequent
+    # dispatches no-ops. The dashboard polls
+    # ~/.hermes/cache/delegation/live/*/ so it picks up this delegation
+    # once the live_writer writes its first event.
+    try:
+        from auto_dashboard import auto_open_dashboard
+        auto_open_dashboard()
+    except Exception as _exc:  # never block dispatch on dashboard failure
+        logger.debug("auto_open_dashboard skipped: %s", _exc)
+
     # Wrap the inner callback with the live-transcript writer
     if live_writer is not None:
         try:
@@ -590,7 +685,7 @@ def _close_manifest(delegation_id: str, exit_reason: str = "completed") -> bool:
         return False
     import time as _time
     try:
-        manifest_path = HERMES_HOME / "cache" / "delegation" / "live" / delegation_id / "manifest.json"
+        manifest_path = _hermes_home() / "cache" / "delegation" / "live" / delegation_id / "manifest.json"
         if not manifest_path.is_file():
             return False
         try:

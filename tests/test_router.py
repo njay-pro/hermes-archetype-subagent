@@ -120,7 +120,8 @@ class TestToolRegistration:
     def test_register(self, router_module):
         ctx = MagicMock()
         router_module.register(ctx)
-        assert ctx.register_tool.call_count == 5
+        # v0.4.0: 5 archetype tools + 1 diagnostics tool = 6
+        assert ctx.register_tool.call_count == 6
 
 
 class TestV031BugFixes:

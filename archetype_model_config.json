@@ -11,33 +11,55 @@
     "consultant": {
       "provider": "custom:9router",
       "model": "arc-consultant1",
+      "fallback_chain": [
+        {"provider": "anthropic", "model": "claude-sonnet-4-6"},
+        {"provider": "minimax", "model": "MiniMax-M3"}
+      ],
       "_comment": "Arc I — Raw Power Frontier. Combo arc-consultant1 (Honcho/9router). Underlying candidates: claude-opus-4-6-thinking, gemini-pro-agent, minimax/MiniMax-M3.",
+      "_fallback_doc": "v0.4.0: if 9router is down, walk this chain. Hermes's resolve_runtime_provider() re-resolves per provider; Hermes's own fallback_models list handles model-level drift inside each provider.",
       "_registered_in_hermes": true
     },
     "long_horizon": {
       "provider": "custom:9router",
       "model": "arc-longHorizon1",
+      "fallback_chain": [
+        {"provider": "minimax", "model": "MiniMax-M3"},
+        {"provider": "ollama", "model": "minimax-m3"}
+      ],
       "_comment": "Arc II — Long-Horizon Stable. Combo arc-longHorizon1. Underlying: minimax/MiniMax-M3, ollama/minimax-m3, gemini-3-flash-agent.",
+      "_fallback_doc": "v0.4.0: see archetype_model_config.json README for chain semantics.",
       "_registered_in_hermes": true
     },
     "high_hallucination": {
       "provider": "custom:9router",
       "model": "arc-highHallucination1",
+      "fallback_chain": [
+        {"provider": "openrouter", "model": "nvidia/nemotron-3-super-120b-a12b:free"}
+      ],
       "_comment": "Arc III — Creative / High-Hallucination. Combo arc-highHallucination1. Underlying: nemotron-3-ultra-550b-a55b:free, nemotron-3-ultra-free, gemini-3-flash-agent. SHORT HORIZON — bounded by iteration count, not tool removal.",
+      "_fallback_doc": "v0.4.0: fallback to a creative-leaning OpenRouter free model.",
       "_registered_in_hermes": true
     },
     "speedster_internal": {
       "provider": "custom:9router",
       "model": "arc-speedster1",
+      "fallback_chain": [
+        {"provider": "ollama", "model": "minimax-m3"}
+      ],
       "_comment": "Arc IVa — Cheap / Fast / Distilled, INTERNAL variant. Combo arc-speedster1. Underlying: minimax/MiniMax-M2.7-highspeed. File reads only — NO terminal, NO web.",
+      "_fallback_doc": "v0.4.0: fallback to local ollama if 9router is down.",
       "_registered_in_hermes": true
     },
     "speedster_internet": {
       "provider": "custom:9router",
       "model": "arc-speedster1",
+      "fallback_chain": [
+        {"provider": "ollama", "model": "minimax-m3"}
+      ],
       "_comment": "Arc IVb — Cheap / Fast / Distilled, NETWORK variant. Combo arc-speedster1 (same combo as IVa; 9router handles cost mode per call). Web fetches only — NO terminal, NO file. To split cost-mode behavior, register a separate `arc-speedster1-internet` combo in 9router and update this field.",
-      "_registered_in_hermes": true,
-      "_open_issue": "speedster_internal and speedster_internet currently point to the same arc-speedster1 combo. If you want them to be different cost modes (e.g. one cheaper), create separate combos in 9router's Honcho dashboard and update the model fields."
+      "_open_issue": "speedster_internal and speedster_internet currently point to the same arc-speedster1 combo. If you want them to be different cost modes (e.g. one cheaper), create separate combos in 9router's Honcho dashboard and update the model fields.",
+      "_fallback_doc": "v0.4.0: fallback to local ollama if 9router is down.",
+      "_registered_in_hermes": true
     }
   },
   "_override_examples": {

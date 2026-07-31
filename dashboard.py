@@ -29,7 +29,24 @@ from typing import Any, Dict, List, Optional
 
 # ─── Config ──────────────────────────────────────────────────────────────
 
-HERMES_HOME = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+# Profile-aware HERMES_HOME: same logic as archetype_delegate.py
+# (kept inlined here so the dashboard module loads without the plugin).
+def _resolve_dashboard_home() -> Path:
+    env_home = os.environ.get("HERMES_HOME", "").strip()
+    if env_home:
+        return Path(env_home)
+    profile = os.environ.get("HERMES_PROFILE", "").strip()
+    if profile:
+        default = Path.home() / ".hermes"
+        if sys.platform == "win32":
+            local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+            if local_appdata:
+                default = Path(local_appdata) / "hermes"
+        return default / "profiles" / profile
+    return Path.home() / ".hermes"
+
+
+HERMES_HOME = _resolve_dashboard_home()
 LIVE_DIR = HERMES_HOME / "cache" / "delegation" / "live"
 DEFAULT_PORT = 8765
 SSE_POLL_INTERVAL_SECS = 1.0

@@ -289,6 +289,149 @@ def list_archetypes() -> List[str]:
     return list(load_archetypes().keys())
 
 
+# v0.4.0: Diagnostics — read live transcript logs and return a structured
+# summary. No dashboard, no frontend — just a dict the orchestrator can
+# consume. Lets us measure fallback rates (Phase 3) and detect bad
+# delegations before the user notices the wrong output.
+_DIAGNOSTICS_DEFAULT_LOOKBACK_SEC = 3600  # 1h
+
+
+def _collect_diagnostics(
+    archetype: Optional[str] = None,
+    since: str = "1h",
+) -> Dict[str, Any]:
+    """Aggregate live-transcript logs into a per-archetype summary.
+
+    Walks ~/.hermes/cache/delegation/live/<deleg_id>/task-*.log, parses each
+    line for archetype + tool + assistant_text + status. Returns a dict
+    shaped for orchestrator consumption.
+
+    Args:
+        archetype: If given, only include that archetype. Otherwise return
+            per-archetype breakdown plus a 'totals' summary.
+        since: Lookback window. Supports '1h', '30m', '90s' or a bare number
+            of seconds. Defaults to 1h.
+    """
+    import json as _json
+    import re as _re
+    import time as _time
+
+    def _parse_window(s: str) -> float:
+        if not s:
+            return float(_DIAGNOSTICS_DEFAULT_LOOKBACK_SEC)
+        m = _re.match(r"^(\d+)([hms]?)$", s.strip().lower())
+        if not m:
+            return float(_DIAGNOSTICS_DEFAULT_LOOKBACK_SEC)
+        n, unit = int(m.group(1)), m.group(2) or "s"
+        return n * {"s": 1, "m": 60, "h": 3600}.get(unit, 1)
+
+    window_sec = _parse_window(since)
+    cutoff = _time.time() - window_sec
+
+    live_root = Path.home() / ".hermes" / "cache" / "delegation" / "live"
+    if not live_root.is_dir():
+        return {"archetype": archetype, "since": since, "total_calls": 0,
+                "window_sec": window_sec, "per_archetype": {}}
+
+    per_arch: Dict[str, Dict[str, Any]] = {}
+    total_calls = 0
+    successful = 0
+    fallback_used = 0
+    latencies: List[float] = []
+    soul_codes: Dict[str, int] = {}
+
+    for deleg_dir in live_root.iterdir():
+        if not deleg_dir.is_dir():
+            continue
+        manifest = deleg_dir / "manifest.json"
+        if not manifest.is_file():
+            continue
+        try:
+            mtime = manifest.stat().st_mtime
+            if mtime < cutoff:
+                continue
+            meta = _json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        arc = meta.get("archetype")
+        if not arc:
+            continue
+        if archetype and arc != archetype:
+            continue
+        # Per-archetype tally
+        slot = per_arch.setdefault(arc, {
+            "calls": 0, "successful": 0, "fallback_used": 0,
+            "latencies": [], "soul_codes": {},
+        })
+        slot["calls"] += 1
+        total_calls += 1
+        status = meta.get("status", "unknown")
+        if status == "completed":
+            slot["successful"] += 1
+            successful += 1
+        if meta.get("fallback_used"):
+            slot["fallback_used"] += 1
+            fallback_used += 1
+        # Latency from started_at + ended_at if present
+        sa = meta.get("started_at")
+        ea = meta.get("ended_at")
+        if isinstance(sa, (int, float)) and isinstance(ea, (int, float)) and ea >= sa:
+            lat = float(ea - sa)
+            slot["latencies"].append(lat)
+            latencies.append(lat)
+        # Scan task log for SOUL codes
+        for log in deleg_dir.glob("task-*.log"):
+            try:
+                for line in log.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    try:
+                        evt = _json.loads(line)
+                    except Exception:
+                        continue
+                    txt = (evt.get("text") or "") if isinstance(evt, dict) else ""
+                    for code in ("EXECUTION_FAILURE", "INSUFFICIENT_DATA",
+                                 "HORIZON_EXCEEDED", "IRRECONCILABLE_STATE",
+                                 "CONTEXT_POLLUTION_RISK"):
+                        if code in txt:
+                            slot["soul_codes"][code] = slot["soul_codes"].get(code, 0) + 1
+                            soul_codes[code] = soul_codes.get(code, 0) + 1
+            except Exception:
+                continue
+
+    def _percentile(values: List[float], p: float) -> Optional[float]:
+        if not values:
+            return None
+        s = sorted(values)
+        k = max(0, min(len(s) - 1, int(round((p / 100.0) * (len(s) - 1)))))
+        return round(s[k], 2)
+
+    # Build per-archetype output (strip raw latencies list)
+    out_per: Dict[str, Any] = {}
+    for arc, slot in per_arch.items():
+        out_per[arc] = {
+            "calls": slot["calls"],
+            "successful": slot["successful"],
+            "fallback_used": slot["fallback_used"],
+            "p50_latency_sec": _percentile(slot["latencies"], 50),
+            "p95_latency_sec": _percentile(slot["latencies"], 95),
+            "soul_codes_emitted": slot["soul_codes"],
+        }
+
+    return {
+        "archetype": archetype,
+        "since": since,
+        "window_sec": window_sec,
+        "totals": {
+            "total_calls": total_calls,
+            "successful": successful,
+            "fallback_used": fallback_used,
+            "p50_latency_sec": _percentile(latencies, 50),
+            "p95_latency_sec": _percentile(latencies, 95),
+            "soul_codes_emitted": soul_codes,
+        },
+        "per_archetype": out_per,
+    }
+
+
 def get_default_disabled_skills() -> List[str]:
     """Return the global list of skill globs disabled by default.
 
@@ -1157,13 +1300,61 @@ def _build_schema(archetype_name: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def _build_all() -> Dict[str, Any]:
-    """Return {tool_name: (schema, handler)} for every archetype."""
+    """Return {tool_name: (schema, handler)} for every archetype
+    plus the v0.4.0 diagnostics tool.
+    """
     load_archetypes()
     out: Dict[str, Any] = {}
     for name in list_archetypes():
         tool_name = f"delegate_task_{name}"
         out[tool_name] = (_build_schema(name), _make_handler(name))
+    # v0.4.0: Diagnostics tool — read live transcripts, return a dict.
+    out["delegate_task_diagnostics"] = (
+        _build_diagnostics_schema(),
+        _make_diagnostics_handler(),
+    )
     return out
+
+
+def _build_diagnostics_schema() -> dict:
+    return {
+        "type": "object",
+        "description": (
+            "v0.4.0: Aggregate live-transcript logs into a per-archetype "
+            "summary. Returns a structured dict (no dashboard). Use this to "
+            "measure fallback rates, detect bad delegations, and track "
+            "SOUL-code emission before the user notices the wrong output."
+        ),
+        "properties": {
+            "archetype": {
+                "type": "string",
+                "description": (
+                    "Filter to one archetype (e.g. 'consultant'). "
+                    "Omit to get totals + per-archetype breakdown."
+                ),
+            },
+            "since": {
+                "type": "string",
+                "description": (
+                    "Lookback window. '1h', '30m', '90s', or bare seconds. "
+                    "Default '1h'."
+                ),
+                "default": "1h",
+            },
+        },
+    }
+
+
+def _make_diagnostics_handler():
+    def handler(archetype=None, since="1h", **extra):
+        return _collect_diagnostics(archetype=archetype, since=since)
+    handler.__name__ = "_delegate_task_diagnostics"
+    handler.__qualname__ = handler.__name__
+    handler.__doc__ = (
+        "v0.4.0: Diagnostics — return per-archetype stats from live "
+        "transcripts. No side effects."
+    )
+    return handler
 
 
 def register(ctx) -> None:
