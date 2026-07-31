@@ -1,5 +1,5 @@
 name: archetype-router
-version: 0.4.3
+version: 0.4.4
 description: |
   OMCA archetype-specific delegation router. Exposes 5 tools that mirror
   Hermes's native `delegate_task` but pre-fill the model, provider,

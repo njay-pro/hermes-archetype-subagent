@@ -1,6 +1,6 @@
 [project]
 name = "hermes-archetype-subagent"
-version = "0.4.3"
+version = "0.4.4"
 description = "OMCA archetype-specific delegation router for Hermes — 5 specialist delegate_task tools with per-archetype model, persona, toolset, and skill isolation."
 readme = "README.md"
 license = { text = "MIT" }

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.4 (2026-07-31) — "Construction-Time Prompt Isolation"
+
+**Fixed:**
+- **Construction-Time Prompt Bloat.** `AIAgent` construction (which builds
+  the system prompt including `<available_skills>`) now runs inside the
+  `skill_isolation_context`. Previously, only the `run_conversation` call
+  was wrapped, meaning the agent's initial prompt loaded all 147 skill
+  frontmatters (massive KV cache bloat). Now, the complement of the
+  allowlist is treated as disabled *during construction*, ensuring only the
+  whitelisted subset (e.g. 47 allowed skills) is parsed and rendered in the
+  system prompt context.
+
 ## 0.4.3 (2026-07-31) — "True Runtime Skill Isolation"
 
 **Added:**
