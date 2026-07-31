@@ -64,7 +64,8 @@ def patch_skills_isolation_system() -> None:
 
     def patched_get_disabled_skill_names(platform: str | None = None) -> set[str]:
         allowlist = _SKILL_ALLOWLIST.get()
-        logger.info("[skill_isolation] patched_get_disabled_skill_names: allowlist=%r", allowlist)
+        logger.info("[skill_isolation] patched_get_disabled_skill_names: allowlist=%r, id_allowlist=%d, id_mod=%d", 
+                    allowlist, id(_SKILL_ALLOWLIST), id(sys.modules[__name__]))
         if allowlist is None:
             return orig_get_disabled(platform)
         
@@ -143,8 +144,11 @@ class skill_isolation_context:
     def __enter__(self):
         if self.allowlist is not None:
             self.token = _SKILL_ALLOWLIST.set(self.allowlist)
+            logger.info("[skill_isolation] Context enter: set allowlist=%r, id_allowlist=%d, id_mod=%d", 
+                        self.allowlist, id(_SKILL_ALLOWLIST), id(sys.modules[__name__]))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.token is not None:
             _SKILL_ALLOWLIST.reset(self.token)
+            logger.info("[skill_isolation] Context exit: reset allowlist")
