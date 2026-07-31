@@ -740,16 +740,21 @@ def archetype_delegate(
     Bypasses native delegate_task and file-system mutations completely while
     preserving live transcript streaming and progress callbacks.
     """
+    # v0.4.3: Wrap AIAgent construction in the skill isolation context
+    # so that the system prompt builder (build_skills_system_prompt)
+    # sees the custom disabled list and excludes non-whitelisted skills
+    # from the initial prompt (preventing context bloat).
     builder = globals().get("_build_child_agent_mimic", _build_child_agent_mimic)
-    child = builder(
-        spec=spec,
-        brief=brief,
-        toolsets=toolsets,
-        parent_agent=parent_agent,
-        model_override=model_override,
-        real_goal=real_goal,
-        task_index=task_index,
-    )
+    with skill_isolation_context(skill_filter):
+        child = builder(
+            spec=spec,
+            brief=brief,
+            toolsets=toolsets,
+            parent_agent=parent_agent,
+            model_override=model_override,
+            real_goal=real_goal,
+            task_index=task_index,
+        )
 
     logger.info(
         "Archetype %s delegating (MIMIC) → model=%s provider=%s base_url=%s toolsets=%s role=%s background=%s",
