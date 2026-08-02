@@ -6,7 +6,7 @@
   "last_updated_by": "njaypro",
   "provider": "custom:9router",
   "base_url": "http://localhost:20128/v1",
-  "_provider_notes": "9router runs locally and routes the combo name to one of the underlying models. Each combo (arc-*) has its own fallback chain INSIDE 9router (visible in the Honcho dashboard). The plugin does NOT see those internal fallbacks — 9router handles retry/upgrade/cheap-mode internally.",
+  "_provider_notes": "9router runs locally and routes the combo name to one of the underlying models. Each combo (arc-*) has its own fallback chain INSIDE 9router (visible in the 9router dashboard). The plugin does NOT see those internal fallbacks — 9router handles retry/upgrade/cheap-mode internally.",
   "archetypes": {
     "consultant": {
       "provider": "custom:9router",
@@ -57,7 +57,7 @@
         {"provider": "ollama", "model": "minimax-m3"}
       ],
       "_comment": "Arc IVb — Cheap / Fast / Distilled, NETWORK variant. Combo arc-speedster1 (same combo as IVa; 9router handles cost mode per call). Web fetches only — NO terminal, NO file. To split cost-mode behavior, register a separate `arc-speedster1-internet` combo in 9router and update this field.",
-      "_open_issue": "speedster_internal and speedster_internet currently point to the same arc-speedster1 combo. If you want them to be different cost modes (e.g. one cheaper), create separate combos in 9router's Honcho dashboard and update the model fields.",
+      "_open_issue": "speedster_internal and speedster_internet currently point to the same arc-speedster1 combo. If you want them to be different cost modes (e.g. one cheaper), create separate combos in 9router's 9router dashboard and update the model fields.",
       "_fallback_doc": "v0.4.0: fallback to local ollama if 9router is down.",
       "_registered_in_hermes": true
     }
@@ -68,10 +68,10 @@
       "archetypes": {
         "consultant": {"provider": "custom:9router", "model": "arc-consultant1"}
       },
-      "_note": "Reorder via 9router's internal combo config, not here. To change which model arc-consultant1 prefers, edit it inside 9router's Honcho dashboard."
+      "_note": "Reorder via 9router's internal combo config, not here. To change which model arc-consultant1 prefers, edit it inside 9router's 9router dashboard."
     },
     "register_a_new_combo": [
-      "1. Create the combo in 9router's Honcho dashboard (e.g. 'arc-realtime1')",
+      "1. Create the combo in 9router's 9router dashboard (e.g. 'arc-realtime1')",
       "2. Register it in Hermes: hermes config set custom_providers.0.models.arc-realtime1.context_length 1000000 --force",
       "3. Add an entry in archetypes.yaml and a new tool in plugin.yaml's provides_tools",
       "4. Write a SOUL_<name>.md identity file",

@@ -34,7 +34,7 @@ def test_fallback_when_primary_fails(monkeypatch):
         primary_model="arc-consultant1",
         fallback_chain=[{"provider": "anthropic", "model": "claude-sonnet-4-6"}],
     )
-    bundle = archetype_delegate.resolve_creds_for_spec(spec)
+    bundle = archetype_delegate.resolve_creds_for_spec(spec, _strict_runtime=True)
     assert bundle["provider"] == "anthropic"
     assert bundle["model"] == "claude-sonnet-4-6"
     assert calls == [("9router", "arc-consultant1"), ("anthropic", "claude-sonnet-4-6")]
@@ -57,7 +57,7 @@ def test_fallback_walks_multiple_entries(monkeypatch):
             {"provider": "minimax", "model": "MiniMax-M3"},
         ],
     )
-    bundle = archetype_delegate.resolve_creds_for_spec(spec)
+    bundle = archetype_delegate.resolve_creds_for_spec(spec, _strict_runtime=True)
     assert bundle["provider"] == "minimax"
     assert bundle["model"] == "MiniMax-M3"
 
@@ -72,7 +72,7 @@ def test_fallback_all_fail_returns_empty_bundle(monkeypatch):
         primary_model="arc-consultant1",
         fallback_chain=[{"provider": "anthropic", "model": "x"}],
     )
-    bundle = archetype_delegate.resolve_creds_for_spec(spec)
+    bundle = archetype_delegate.resolve_creds_for_spec(spec, _strict_runtime=True)
     assert bundle["base_url"] is None
     assert bundle["api_key"] is None
 
@@ -91,7 +91,7 @@ def test_no_fallback_returns_primary(monkeypatch):
         primary_model="arc-consultant1",
         fallback_chain=[{"provider": "anthropic", "model": "x"}],
     )
-    bundle = archetype_delegate.resolve_creds_for_spec(spec)
+    bundle = archetype_delegate.resolve_creds_for_spec(spec, _strict_runtime=True)
     assert bundle["provider"] == "custom:9router"
     assert calls == [("9router", "arc-consultant1")]
 

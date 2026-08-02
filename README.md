@@ -254,6 +254,12 @@ python dashboard.py
 
 Plugin dispatches also write a sibling `meta.json` with `archetype`, `model`, and `provider`, so the dashboard can distinguish a Consultant from a Speedster without changing Hermes's native manifest format.
 
+> [!NOTE]
+> The dashboard works with or without 9router. If you run the plugin without 9router (using a different provider directly), the dashboard still renders — it just won't show 9router-specific combo metadata.
+
+> [!IMPORTANT]
+> 9router is **recommended** for the full archetype experience (internal fallback chains, combo routing, cost-mode switching), but it is **completely optional**. The plugin works with any provider you register in Hermes — you can point each archetype directly at `openrouter`, `anthropic`, `ollama`, or any `custom:` provider. If you do not have 9router running, skip the 9router dashboard steps and register your preferred models in `archetype_model_config.json` with your chosen provider.
+
 ---
 
 ## Native or archetype router?

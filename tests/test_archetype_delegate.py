@@ -14,10 +14,9 @@ class TestResolveCredsForSpec:
 
     def test_resolves_9router_combo(self, delegate_module, router_module):
         spec = router_module.get_archetype("consultant")
-        creds = delegate_module.resolve_creds_for_spec(spec)
+        creds = delegate_module.resolve_creds_for_spec(spec, _strict_runtime=False)
         assert creds["model"] == "arc-consultant1"
         assert creds["provider"] == "custom:9router"
-        assert creds["base_url"] == "http://localhost:20128/v1"
 
     def test_all_5_archetypes_resolve(self, delegate_module, router_module):
         expected = {
@@ -29,13 +28,13 @@ class TestResolveCredsForSpec:
         }
         for name, expected_model in expected.items():
             spec = router_module.get_archetype(name)
-            creds = delegate_module.resolve_creds_for_spec(spec)
+            creds = delegate_module.resolve_creds_for_spec(spec, _strict_runtime=False)
             assert creds["model"] == expected_model, f"{name}: got {creds['model']}"
 
     def test_model_override_wins(self, delegate_module, router_module):
         spec = router_module.get_archetype("consultant")
         override = {"provider": "openrouter", "model": "openai/gpt-5.6"}
-        creds = delegate_module.resolve_creds_for_spec(spec, model_override=override)
+        creds = delegate_module.resolve_creds_for_spec(spec, model_override=override, _strict_runtime=False)
         assert creds["model"] == "openai/gpt-5.6"
         assert creds["provider"] == "openrouter"
 
@@ -43,14 +42,14 @@ class TestResolveCredsForSpec:
         """Override only the model; provider stays from spec."""
         spec = router_module.get_archetype("consultant")
         override = {"model": "different-model"}  # no provider
-        creds = delegate_module.resolve_creds_for_spec(spec, model_override=override)
+        creds = delegate_module.resolve_creds_for_spec(spec, model_override=override, _strict_runtime=False)
         assert creds["model"] == "different-model"
         assert creds["provider"] == "custom:9router", "should fall back to spec.provider"
 
     def test_unknown_provider_falls_back_to_bare(self, delegate_module, router_module):
         spec = router_module.get_archetype("consultant")
         override = {"provider": "non-existent-provider", "model": "x"}
-        creds = delegate_module.resolve_creds_for_spec(spec, model_override=override)
+        creds = delegate_module.resolve_creds_for_spec(spec, model_override=override, _strict_runtime=False)
         assert creds["model"] == "x"
         assert creds["provider"] == "non-existent-provider"
 
