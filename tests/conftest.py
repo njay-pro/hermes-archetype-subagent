@@ -7,6 +7,7 @@ the plugin via spec_from_file_location, not via pip).
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -20,10 +21,18 @@ PLUGIN_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PLUGIN_DIR.parent))  # so `import archetype_delegate` works
 sys.path.insert(0, str(PLUGIN_DIR))
 
-# Add Hermes agent path if present so hermes_cli, run_agent, agent modules resolve
-hermes_agent_dir = Path.home() / ".hermes" / "hermes-agent"
-if hermes_agent_dir.is_dir() and str(hermes_agent_dir) not in sys.path:
-    sys.path.insert(0, str(hermes_agent_dir))
+# Add Hermes agent path so hermes_cli, run_agent, agent, tools modules resolve.
+# In CI the install path is fixed; locally we discover via HERMES_AGENT_PATH or ~/.hermes/hermes-agent.
+_candidate_hermes_paths = [
+    os.environ.get("HERMES_AGENT_PATH"),
+    str(Path.home() / ".hermes" / "hermes-agent"),
+    "/opt/hermes-agent",
+    "/home/runner/work/hermes-archetype-subagent/hermes-agent",
+    "/home/runner/work/_temp/hermes-agent",
+]
+for _candidate in _candidate_hermes_paths:
+    if _candidate and Path(_candidate).is_dir() and _candidate not in sys.path:
+        sys.path.insert(0, _candidate)
 
 
 

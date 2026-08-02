@@ -16,6 +16,16 @@ jobs:
         with:
           enable-cache: false
 
+      - name: Install hermes-agent
+        uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          path: _hermes_agent
+          sparse-checkout: hermes_cli agent tools
+
+      - name: Add hermes-agent to PYTHONPATH
+        run: echo "HERMES_AGENT_PATH=$GITHUB_WORKSPACE/_hermes_agent" >> $GITHUB_ENV
+
       - name: Install dependencies
         run: uv sync --extra dev --extra test
 
