@@ -624,10 +624,21 @@ class TestCollapsedArgRecovery:
         import archetype_delegate as ad
         monkeypatch.setattr(ad, "archetype_delegate", fake_spawn, raising=False)
 
+        target_skill = "knows_multiAgent-orchestrationHowTo"
+        discovered = router_module._list_all_skills(router_module._resolve_skill_roots())
+        if target_skill not in discovered:
+            # Unit isolation: make the historical canary independent from the
+            # operator's machine-level external skill roots.
+            monkeypatch.setattr(
+                router_module,
+                "_list_all_skills",
+                lambda roots: sorted(set(discovered) | {target_skill}),
+            )
+
         handler = router_module._make_handler("consultant")
         collapsed_goal = {
             "goal": "List the skills you can see.",
-            "skill_include_override": ["knows_multiAgent-orchestrationHowTo"],
+            "skill_include_override": [target_skill],
         }
         handler(goal=collapsed_goal)
 
@@ -651,10 +662,19 @@ class TestCollapsedArgRecovery:
         import archetype_delegate as ad
         monkeypatch.setattr(ad, "archetype_delegate", fake_spawn, raising=False)
 
+        target_skill = "knows_multiAgent-orchestrationHowTo"
+        discovered = router_module._list_all_skills(router_module._resolve_skill_roots())
+        if target_skill not in discovered:
+            monkeypatch.setattr(
+                router_module,
+                "_list_all_skills",
+                lambda roots: sorted(set(discovered) | {target_skill}),
+            )
+
         handler = router_module._make_handler("consultant")
         collapsed_goal = {
             "goal": "x",
-            "skill_include_override": ["knows_multiAgent-orchestrationHowTo"],
+            "skill_include_override": [target_skill],
         }
         # Explicit named param should override the collapsed one.
         handler(goal=collapsed_goal, skill_include_override=["nodes_vector-search"])
