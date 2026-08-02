@@ -1,248 +1,309 @@
-# hermes-archetype-subagent
+<div align="center">
 
-> **`delegate_task` on steroids.** Five archetype-specific delegation
-> tools for Hermes, built by mimicking the native `delegate_task` machinery
-> and adding the per-archetype configuration layer (model, persona,
-> toolset, skill isolation) that `delegate_task` deliberately refuses to
-> bake in.
+# Hermes Archetype Router
 
----
+### One subagent is not a system.
 
-## The 5 Tools
+**Five specialist delegation tools for Hermes Agent — each with its own model, persona, toolset, execution horizon, and isolated skill context.**
 
-| Tool | Archetype | Combo | Tools | Max Iter |
-|------|-----------|-------|-------|----------|
-| `delegate_task_consultant`             | I  — Raw Power / Frontier        | `arc-consultant1`         | `[terminal, file, web]` | 50  |
-| `delegate_task_long_horizon`           | II — Low-Hallucination / Stable  | `arc-longHorizon1`       | `[terminal, file, web]` | 100 |
-| `delegate_task_high_hallucination`     | III — Creative / Lateral          | `arc-highHallucination1` | `[terminal, file, web]` | 40  |
-| `delegate_task_speedster_internal`     | IVa — Cheap / LOCAL Files        | `arc-speedster1`          | `[file]` | 15 |
-| `delegate_task_speedster_internet`     | IVb — Cheap / NETWORK Fetches    | `arc-speedster1`          | `[web]` | 20 |
+[![Release](https://img.shields.io/github/v/release/njay-pro/hermes-archetype-subagent?style=flat-square&label=release)](https://github.com/njay-pro/hermes-archetype-subagent/releases/latest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/njay-pro/hermes-archetype-subagent/test.yml?branch=main&style=flat-square&label=tests)](https://github.com/njay-pro/hermes-archetype-subagent/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-111111?style=flat-square)](LICENSE)
+[![Hermes Agent](https://img.shields.io/badge/Hermes-Agent-5B3422?style=flat-square)](https://github.com/NousResearch/hermes-agent)
+
+[Why it exists](#the-problem-is-not-delegation-it-is-fit) · [Meet the archetypes](#five-archetypes-five-jobs) · [Use it](#use-it-in-60-seconds) · [Install](#installation-let-hermes-do-it) · [Documentation](#go-deeper)
+
+</div>
 
 ---
 
-## 60-Second Usage
+## The problem is not delegation. It is fit.
+
+Hermes already knows how to spawn a subagent. Native `delegate_task` is excellent at that job: give it a goal, create a child agent, run the work.
+
+But a real orchestration system needs another decision **before** the child starts:
+
+- Does this job need frontier reasoning or long-horizon stability?
+- Should the agent have a terminal, only local files, or only the web?
+- Which procedural skills belong in its context — and which ones are noise?
+- Is the desired output prose, a schema, or a deterministic extraction?
+- How far should the agent be allowed to run?
+
+Pasting a larger prompt into one generic subagent does not solve this. It just moves the routing problem into prose.
+
+**Hermes Archetype Router turns those decisions into five explicit tools.** The orchestrator chooses the kind of mind the task needs; the plugin assembles the right child around it.
+
+```mermaid
+flowchart LR
+    O[Orchestrator] --> Q{What kind of work?}
+
+    Q -->|Ambiguous intent<br/>architecture<br/>final synthesis| C[◆ Consultant]
+    Q -->|Stateful execution<br/>multi-step build<br/>anti-drift work| L[☰ Long Horizon]
+    Q -->|Creative alternatives<br/>lateral exploration| H[✦ High Hallucination]
+    Q -->|Local scan<br/>classification<br/>extraction| SI[▣ Speedster Internal]
+    Q -->|Web fetch<br/>endpoint extraction<br/>network scan| SW[◌ Speedster Internet]
+
+    C --> R[Verified result]
+    L --> R
+    H --> R
+    SI --> R
+    SW --> R
+```
+
+> **The plugin does not replace `delegate_task`.** It preserves the native delegation shape and adds a configurable archetype layer above it.
+
+---
+
+## Five archetypes. Five jobs.
+
+| When the work needs… | Call | The posture | Default tools | Horizon |
+|---|---|---|---|---:|
+| Raw nuance, architectural judgment, intent distillation | `delegate_task_consultant` | **◆ Consultant** — pass the friction, resolve the system | terminal · file · web | 50 |
+| Reliable, stateful, multi-step execution | `delegate_task_long_horizon` | **☰ Workhorse** — self-manage the plan, resist drift | terminal · file · web | 100 |
+| Three alternatives, lateral thinking, expressive exploration | `delegate_task_high_hallucination` | **✦ Creative** — explore widely, stay grounded | terminal · file · web | 40 |
+| Fast local file scanning and deterministic extraction | `delegate_task_speedster_internal` | **▣ Local speedster** — execute a shaped tree | file only | 15 |
+| Fast web fetching and endpoint extraction | `delegate_task_speedster_internet` | **◌ Network speedster** — fetch, filter, return | web only | 20 |
+
+The distinction is operational, not decorative. A speedster is intentionally narrow. A long-horizon worker is intentionally patient. A creative agent is allowed to diverge — inside a bounded horizon. The tool name communicates that contract to the orchestrator before any prompt is written.
+
+### A simple routing rule
+
+```text
+Need to understand the problem?        → consultant
+Need to execute the solution?          → long_horizon
+Need distinct creative directions?     → high_hallucination
+Need to scan local files quickly?       → speedster_internal
+Need to fetch the web quickly?          → speedster_internet
+```
+
+> [!IMPORTANT]
+> Speedsters expect a pre-shaped `STEP 1 → STEP 2 → ...` execution tree. Give one an open-ended request like “audit this codebase” and it may return `EXECUTION_FAILURE / NO_EXECUTION_TREE_PROVIDED`. That is a guardrail, not a bug. Route open-ended work to Consultant or Long Horizon.
+
+---
+
+## What changes under the hood
+
+Each tool builds a child agent from five independent layers:
+
+```mermaid
+flowchart TB
+    G[goal + context] --> B[Canonical brief]
+    P[SOUL persona] --> B
+    M[model + provider combo] --> A[Child AIAgent]
+    T[toolset + max iterations] --> A
+    S[L1 / L2 / L3 skill isolation] --> A
+    B --> A
+    A --> X[Live transcript + result]
+
+    subgraph Configuration
+      M1[archetype_model_config.json] --> M
+      Y[archetypes.yaml] --> T
+      Y --> S
+      P1[SOUL_name.md] --> P
+    end
+```
+
+| Layer | Source of truth | What it controls |
+|---|---|---|
+| **Model** | `archetype_model_config.json` | provider, model combo, fallback information |
+| **Mechanics** | `archetypes.yaml` | toolsets, iteration cap, output schema, default-disabled skills |
+| **Identity** | `SOUL_<name>.md` | role, briefing posture, anti-patterns, escalation behavior |
+| **Per-call context** | tool arguments | goal, context, preloaded files, schema/model/skill overrides |
+| **Observability** | native-compatible live logs | progress, manifests, metadata, dashboard rendering |
+
+Model config and mechanical config reload on file modification. SOUL files are read on every call. You can retune the team without rewriting orchestration code.
+
+---
+
+## Use it in 60 seconds
 
 ```python
-# From any AIAgent in any Hermes profile:
-
+# Resolve an architectural decision.
 delegate_task_consultant(
-    goal="Analyze the auth bottleneck in this codebase",
-    context="Tech stack: Python, FastAPI, Redis. 10K req/s baseline.",
+    goal="Analyze the auth bottleneck and recommend one architecture.",
+    context="Python, FastAPI, Redis. Current baseline: 10K requests/second.",
 )
 
-delegate_task_speedster_internal(
-    goal="Classify each .md file by topic. Return {file, topic} pairs.",
-    skill_include_override=["nodes_caption_image"],
+# Hand a stable worker the implementation mission.
+delegate_task_long_horizon(
+    goal="Implement the selected auth architecture and verify the full test suite.",
+    context="The architecture decision is locked. Preserve public API behavior.",
 )
 
+# Explore before committing to one visual direction.
 delegate_task_high_hallucination(
-    goal="Generate 5 brand names for a luxury lighting line",
-    context="Audience: architects, interior designers, high-end retail.",
-    output_schema_override={"type": "array", "items": {"type": "string"}},
+    goal="Create exactly three distinct launch concepts for a luxury lighting line.",
+    context="Audience: architects and high-end hospitality studios.",
+    output_schema_override={
+        "type": "array",
+        "items": {"type": "object"},
+        "minItems": 3,
+        "maxItems": 3,
+    },
 )
 ```
 
-All 5 tools accept the same params as native `delegate_task` plus 4
-plugin extras: `output_schema_override`, `skill_include_override`,
-`skill_exclude_override`, `model_override`.
+Need a specific file in the agent's context from the first token?
+
+```python
+delegate_task_long_horizon(
+    goal="Execute the approved migration described in the attached plan.",
+    preload_files=["/absolute/path/to/MIGRATION_PLAN.md"],
+)
+```
+
+Need three sibling tasks at once? The plugin preserves native-style batch mode and dispatches the tasks in parallel under the same archetype:
+
+```python
+delegate_task_speedster_internet(
+    tasks=[
+        {"goal": "STEP 1: Fetch release A. STEP 2: Extract breaking changes."},
+        {"goal": "STEP 1: Fetch release B. STEP 2: Extract breaking changes."},
+        {"goal": "STEP 1: Fetch release C. STEP 2: Extract breaking changes."},
+    ]
+)
+```
+
+All five tools preserve the familiar native slots — `goal`, `context`, `tasks`, `max_iterations`, `role`, `background`, `parent_agent` — and add four overrides:
+
+- `output_schema_override`
+- `skill_include_override` / `skill_exclude_override`
+- `model_override`
+- `preload_files`
+
+See the full [API reference](docs/API.md).
 
 ---
 
-## The Manifesto (1-paragraph version)
+## Skill isolation without context sludge
 
-`delegate_task` is a general-purpose subagent launcher. It takes a
-goal, spawns a child AIAgent, runs it. That's exactly what it should
-do — and it should NOT grow into a router, a model selector, a
-persona injector, or a skill filter. Those are orchestrator
-decisions. The archetype plugin gives the orchestrator 5 well-typed
-tools, one per archetype. Each tool is `delegate_task` with the
-archetype's config baked in.
+A specialist should not inherit every skill the parent happens to know.
 
-**The plugin is not fighting `delegate_task`; it is `delegate_task`
-made configurable.** Read the [full manifesto](docs/ARCHITECTURE.md#manifesto-why-delegate_task-on-steroids).
+The router resolves subagent skills in three layers:
 
----
+1. **OMCA baseline** — reusable `omca-*`, `omca_*`, `knows_*`, `nodes_*`, and `subflows_*` capabilities.
+2. **Config safety net** — pollution-prone skills (currently `honcho-*`) stay off by default.
+3. **Per-call decision** — the orchestrator can narrow to an exact whitelist or add an exclusion for this one job.
 
-## Quick Configuration Reference
+```python
+delegate_task_speedster_internal(
+    goal="STEP 1: Read the image bank. STEP 2: Return matching asset paths.",
+    skill_include_override=["nodes_vector-search"],
+)
+```
 
-| File | Holds | When to edit |
-|------|-------|--------------|
-| `archetype_model_config.json` | provider + model combo per archetype | Model ships/retires; swap combo |
-| `archetypes.yaml` | toolsets, max_iterations, output_schema, `default_disabled_skills` | Persona evolves, skill set changes |
-| `SOUL_<name>.md` × 5 | Identity prose | Persona identity changes |
-
-All three auto-reload on mtime change — no plugin restart, no gateway
-restart. Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+The isolation applies while the child prompt is constructed **and** while the child runs. The parent agent's tool state is never mutated.
 
 ---
 
-## Installation — don't do this by hand
+## Installation: let Hermes do it
 
-**This plugin is tightly coupled to Hermes internals.** It mimics
-`delegate_task`'s call path (`AIAgent`, live-transcript writer,
-`_active_subagents` registration, profile env propagation). A Hermes
-upgrade can silently break it.
+This plugin intentionally follows Hermes internals closely: child-agent construction, provider resolution, profile propagation, live transcripts, and active-subagent registration. An agent can inspect your actual profile topology and install it more safely than a generic shell snippet can.
 
-**Don't try to install it yourself.** Paste the prompt below into your
-Hermes agent and let it walk the install. The agent has the context to
-discover your profiles, your `custom_providers.0.models` registrations,
-and your gateway state — you don't.
+Copy this into Hermes:
 
 ````markdown
-Install the hermes-archetype-subagent plugin from
-https://github.com/njay-pro/hermes-archetype-subagent (tag v0.4.0).
+Install Hermes Archetype Router v1.0.0 from:
+https://github.com/njay-pro/hermes-archetype-subagent
 
-Steps:
-1. Clone to ~/.hermes/plugins/archetype-router (NOT ~/Code/... —
-   plugin loader expects this path).
-2. Run `uv sync --extra dev --extra test` inside that clone.
-3. Replace ~/.hermes/plugins/archetype-router if it was a real dir
-   (some users have one) with a symlink to the clone.
-4. For each Hermes profile you have (discover them via
-   ~/.hermes/profiles/), symlink ~/.hermes/profiles/<prof>/plugins/archetype-router
-   to ~/.hermes/plugins/archetype-router.
-5. Read archetype_model_config.json. For each `arc-*` combo in
-   the archetypes block, register it in Hermes:
-     hermes config set custom_providers.0.models.<combo>.context_length 1000000 --force
-   Do this for ALL your profiles.
-6. Restart the gateway so it picks up the plugin.
-7. Verify: dispatch delegate_task_consultant with goal="echo your SOUL
-   first 50 chars" — subagent should return. If it returns
-   ModuleNotFoundError, you forgot step 2.
-8. The first dispatch in any new Hermes session auto-opens the
-   dashboard at http://127.0.0.1:8765/. No action needed.
+Do the installation end-to-end:
+1. Clone tag v1.0.0 to ~/.hermes/plugins/archetype-router.
+2. Install its development and test dependencies with `uv sync --extra dev --extra test`.
+3. Discover every Hermes profile under ~/.hermes/profiles/ and symlink each
+   profile's plugins/archetype-router to the canonical clone.
+4. Read archetype_model_config.json and register every `arc-*` combo in each
+   profile with `hermes config set custom_providers.0.models.<combo>.context_length 1000000 --force`.
+5. Run the plugin test suite.
+6. Restart the gateway so Hermes loads the plugin.
+7. Verify a real `delegate_task_consultant` call and report the exact result.
 
-If any step fails, stop and tell me which step + the error. Do NOT
-work around silently.
+If a step fails, stop and report the failed step and real error. Do not invent a workaround.
 ````
 
-**After install:** the agent should report what it did and the result of
-step 7. If anything looks wrong, paste the output back and we'll debug.
+> [!CAUTION]
+> The plugin is tested against the Hermes generation current at the v1.0.0 release. Hermes internals evolve; pin the release, run the tests, and verify a real delegation after upgrading either side.
 
-**Compatibility:** tested against Hermes as of 2026-07. If your Hermes
-is more than a few months old or pre-release, ask before installing.
+### Install the companion OMCA skills (optional)
 
----
-
-## Install the Skills (Optional)
-
-This plugin bundles 2 skills it uses heavily. To install them to all
-your Hermes profiles + AGENT-* workspaces:
+The repository also ships the orchestration and prompt-engineering skills used to brief the archetypes:
 
 ```bash
 cd docs/skills
 ./install.sh
 ```
 
-Restart Hermes. See [docs/SKILLS.md](docs/SKILLS.md) for details.
+See [docs/SKILLS.md](docs/SKILLS.md) for destinations and update behavior.
 
 ---
 
-## Documentation Map
+## The dashboard is part of the system
 
-| You want to... | Read |
-|---|---|
-| What is this plugin? | [README.md](README.md) (you are here) |
-| How does it work internally? | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| Edit config / swap model | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) |
-| Add a new archetype / skill | [docs/EXTENDING.md](docs/EXTENDING.md) |
-| Look up a public function | [docs/API.md](docs/API.md) |
-| Run / write tests | [docs/TESTING.md](docs/TESTING.md) |
-| Debug a live delegation | [docs/DEBUGGING.md](docs/DEBUGGING.md) |
-| Decide native vs plugin | [docs/CAPABILITIES.md](docs/CAPABILITIES.md) |
-| Plan a feature | [docs/ROADMAP.md](docs/ROADMAP.md) |
-| Install the shipped skills | [docs/SKILLS.md](docs/SKILLS.md) |
-| File map for AI agents | [AGENTS.md](AGENTS.md) |
+Every delegation writes the same live-transcript format used by native Hermes delegation. The included dashboard turns those artifacts into an archetype-aware control surface:
 
----
-
-## Speedster is narrow on purpose
-
-`delegate_task_speedster_internal` and `delegate_task_speedster_internet`
-are intentionally narrow. They are **deterministic, single-pass
-extraction** agents — feed them a pre-shaped `STEP 1, STEP 2, ...` tree
-and they execute it. Feed them an open-ended goal like "audit this
-codebase" and they return `EXECUTION_FAILURE / NO_EXECUTION_TREE_PROVIDED`
-because their SOUL explicitly rejects that shape.
-
-This is **correct behavior, not a bug.** If you need open-ended analysis,
-use `delegate_task_consultant` or `delegate_task_long_horizon` instead.
-See [SOUL_speedster_internet.md](SOUL_speedster_internet.md) for the
-full briefing discipline.
-
----
-
-## Anti-patterns (operator quick-reference)
-
-❌ **Using one archetype for everything** — collapses the cost/latency
-spectrum. Mix archetypes per call: speedster for classify, consultant
-for synthesize.
-
-❌ **Inlining the SOUL into the goal** — the SOUL is auto-injected.
-Just write the task.
-
-❌ **Calling native `delegate_task` when you need a different model /
-toolset** — use the archetype tool.
-
-❌ **Editing `~/.hermes/config.yaml` directly to swap models** — use
-`archetype_model_config.json` and `hermes config set` for combo
-registration.
-
-❌ **Forgetting to register a combo in `custom_providers.0.models`** —
-every combo MUST be registered. See
-[docs/CONFIGURATION.md](docs/CONFIGURATION.md#combo-registration).
-
----
-
-## Versioning
-
-- **0.3** — mimic via direct `AIAgent` construction. No file-system
-  mutations. 9router combo routing. Live transcripts. Speedster split
-  into internal/internet. `high_hallucination` full surface, short
-  horizon.
-- **0.3.2** — `child_session_id` wiring + native `_active_subagents`
-  registration for TUI preview pane. Optional web preview pane
-  (`dashboard.py`, see below).
-
----
-
-## Optional: Web Preview Pane
-
-`dashboard.py` is a single-file, stdlib-only web server that reads
-`~/.hermes/cache/delegation/live/*/manifest.json` + `task-*.log` and
-renders every delegation (native AND plugin) in a single page.
+- Today / Yesterday / Earlier grouping
+- per-archetype color rails and model badges
+- live SSE transcript expansion
+- archetype filter chips
+- native-delegation fallback for logs without plugin metadata
+- no frontend build step and no runtime dependencies
 
 ```bash
-python dashboard.py             # serves on http://127.0.0.1:8765
-python dashboard.py --port 9000 # custom port
-python dashboard.py --no-clear  # skip the startup prune of old delegations
+python dashboard.py
+# http://127.0.0.1:8765
 ```
 
-What you get:
-- **Timeline** of all delegations (newest first), with status badge +
-  goal preview
-- **Detail view** of the selected delegation, with live transcript
-  streaming (SSE; auto-tail mode for running ones)
-- **Zero dependencies** — Python 3.9+ stdlib only. No `pip install`
-  needed. `Ctrl+C` to stop.
-
-It works for both `delegate_task` (native) and the 5 archetype tools
-(consultant, long_horizon, high_hallucination, speedster_internal,
-speedster_internet) because both write to the same on-disk format.
-
-**Note:** the plugin currently writes the goal as
-`[consultant] (live transcript)` (a placeholder) instead of the real goal.
-The dashboard shows whatever is in the log — the real goal for native,
-the placeholder for plugin delegations. Fix tracked in v0.3.2 TODO.
+Plugin dispatches also write a sibling `meta.json` with `archetype`, `model`, and `provider`, so the dashboard can distinguish a Consultant from a Speedster without changing Hermes's native manifest format.
 
 ---
 
-## License
+## Native or archetype router?
 
-MIT. See `LICENSE` (or, until we add it, the standard MIT terms).
+Use the smallest sound tool.
+
+| Choose native `delegate_task` when… | Choose Archetype Router when… |
+|---|---|
+| the parent's current model, persona, and toolset already fit | the work needs a different model, persona, or tool boundary |
+| you want the simplest general-purpose child | you have recurring specialist delegation patterns |
+| you do not need per-call skill filtering | context isolation matters |
+| one flexible agent is enough | the orchestrator needs an explicit team vocabulary |
+
+Most systems should begin with native delegation. Add this router when “send it to a subagent” has become too vague to be a useful decision.
+
+The detailed matrix lives in [docs/CAPABILITIES.md](docs/CAPABILITIES.md).
 
 ---
 
-**Next step:** open [AGENTS.md](AGENTS.md) for the file map, or jump
-straight to [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
-v0.3 Mimic design.
+## Go deeper
+
+| You want to… | Read |
+|---|---|
+| Understand the design and manifesto | [Architecture](docs/ARCHITECTURE.md) |
+| Configure models, tools, SOULs, and hot reload | [Configuration](docs/CONFIGURATION.md) |
+| Call every public surface | [API](docs/API.md) |
+| Add an archetype | [Extending](docs/EXTENDING.md) |
+| Choose native vs plugin | [Capabilities](docs/CAPABILITIES.md) |
+| Debug a live delegation | [Debugging](docs/DEBUGGING.md) |
+| Run or add tests | [Testing](docs/TESTING.md) |
+| See planned work | [Roadmap](docs/ROADMAP.md) |
+| Navigate the repository as an agent | [AGENTS.md](AGENTS.md) |
+
+---
+
+## Project status
+
+- **Current release:** [`v1.0.0`](https://github.com/njay-pro/hermes-archetype-subagent/releases/tag/v1.0.0)
+- **Test suite at release:** 102 passing locally
+- **License:** [MIT](LICENSE)
+- **Author:** Njay + Hermes, built inside the [OMCA](https://github.com/njay-pro/hermes-archetype-subagent/blob/main/docs/ARCHITECTURE.md) orchestration practice
+
+This is an independent Hermes Agent plugin, not an official Nous Research package.
+
+---
+
+<div align="center">
+
+**Give the task the kind of mind it needs.**
+
+[Install](#installation-let-hermes-do-it) · [Read the architecture](docs/ARCHITECTURE.md) · [Open an issue](https://github.com/njay-pro/hermes-archetype-subagent/issues)
+
+</div>
